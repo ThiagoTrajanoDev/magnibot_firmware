@@ -1,4 +1,3 @@
-#include <stdio.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -7,34 +6,58 @@
 
 #include "config.h"
 #include "state_machine.h"
-
+#include "button_control.h"
 
 static const char *TAG = "MAGNIBOT";
 
 void app_main(void) {
 
-    // Estado inicial do robo
     robot_state_t estado_atual = ROBOT_IDLE;
 
-    ESP_LOGI(TAG, "Inicializando MagniBot...");
-    ESP_LOGI(TAG, "Eixos configurados: %d", TOTAL_EIXOS);
-    ESP_LOGI(TAG, "UART: %d bps", UART_BAUDRATE);
+    // Estrutura do botao Start
+    button_control_t botao_start;
 
-    ESP_LOGI(
-        TAG,
-        "Estado inicial: %s",
+    // Inicializacao
+    ESP_LOGI(TAG, "Inicializando MagniBot...");
+
+    button_control_init(
+        &botao_start,
+        BTN_START_GPIO
+    );
+
+    ESP_LOGI(TAG, "Estado inicial: %s",
         state_machine_get_name(estado_atual)
     );
 
     while (1) {
 
-        // Futuramente:
-        // 1. Leitura dos botoes
-        // 2. Processamento dos eventos
-        // 3. Controle dos motores
-        // 4. Leitura dos sensores
-        // 5. Atualizacao da telemetria
+        robot_event_t evento;
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+        // Verifica se algum evento foi identificado
+        if (
+            button_control_update(
+                &botao_start,
+                &evento
+            )
+        ) {
+
+            // Envia evento para a maquina de estados
+            bool mudou = state_machine_process_event(
+                &estado_atual,
+                evento
+            );
+
+            if (mudou) {
+
+                ESP_LOGI(
+                    TAG,
+                    "Novo estado: %s",
+                    state_machine_get_name(estado_atual)
+                );
+            }
+        }
+
+        // Periodo de monitoramento: 10 ms
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
