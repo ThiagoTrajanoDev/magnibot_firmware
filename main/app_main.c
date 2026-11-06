@@ -7,12 +7,17 @@
 #include "config.h"
 #include "state_machine.h"
 #include "button_control.h"
+#include "led_control.h"
 
 static const char *TAG = "MAGNIBOT";
 
 void app_main(void) {
 
+
     robot_state_t estado_atual = ROBOT_IDLE;
+    led_control_init();
+
+    led_control_update(estado_atual);
 
     // Estrutura do botao Start
     button_control_t botao_start;
@@ -48,7 +53,7 @@ void app_main(void) {
             );
 
             if (mudou) {
-
+              led_control_update(estado_atual);
                 ESP_LOGI(
                     TAG,
                     "Novo estado: %s",

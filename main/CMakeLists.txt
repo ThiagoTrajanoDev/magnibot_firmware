@@ -3,7 +3,10 @@ idf_component_register(
         "app_main.c"
         "state_machine.c"
         "button_control.c"
-
-    INCLUDE_DIRS
-        "."
+        "led_control.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        led_strip
+        esp_driver_gpio
+        esp_timer
 )
