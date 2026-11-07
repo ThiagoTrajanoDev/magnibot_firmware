@@ -29,3 +29,8 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Imain tests/test_cycle.c main/motion_model.c main/sensor_data.c \
     main/cycle_sequence.c -lm -o "$test_dir/test_cycle"
 "$test_dir/test_cycle"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
+    -Imain tests/test_interfaces.c main/hardware_io.c main/sensor_interface.c \
+    main/actuator_interface.c main/motion_model.c main/sensor_data.c \
+    -lm -o "$test_dir/test_interfaces"
+"$test_dir/test_interfaces"
