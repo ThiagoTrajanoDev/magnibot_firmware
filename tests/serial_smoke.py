@@ -12,6 +12,7 @@ def main():
     args = argparse.ArgumentParser()
     args.add_argument('--port', required=True)
     args.add_argument('--output-dir', required=True)
+    args.add_argument('--milestone', choices=('m2', 'm3'), default='m2')
     options = args.parse_args()
     output = Path(options.output_dir).resolve()
     firmware = Path(__file__).resolve().parents[1]
@@ -60,7 +61,12 @@ def main():
     try:
         collect(2)
         response(b'MB1 1 status\n', 'ok', 1, 'IDLE')
-        response(b'MB1 2 diagnostic\r\n', 'ok', 2, 'IDLE')
+        initial_diagnostic = response(b'MB1 2 diagnostic\r\n', 'ok', 2, 'IDLE')
+        if options.milestone == 'm3':
+            d = initial_diagnostic['diagnostic']
+            assert d['backend'] == 'disabled' and d['axes_configured'] == 0
+            assert d['sequence_phase'] == 'idle' and d['sequence_fault'] == 'none'
+            assert d['distance_status'] == d['current_status'] == 'unavailable'
         for ident, command in enumerate(('start', 'confirm', 'rescan'), 3):
             response(f'MB1 {ident} {command}\n'.encode(), 'motion_blocked', ident, 'IDLE')
         port.write(b'MB1 6 sta')
@@ -85,6 +91,11 @@ def main():
         diagnostic = response(b'MB1 19 diagnostic\n', 'ok', 19, 'ERROR')
         assert diagnostic['diagnostic']['protocol_errors'] > 0
         assert diagnostic['diagnostic']['dropped_responses'] > 0
+        if options.milestone == 'm3':
+            d = diagnostic['diagnostic']
+            assert d['backend'] == 'disabled' and d['axes_configured'] == 0
+            assert d['sequence_phase'] == 'error' and d['sequence_fault'] == 'emergency'
+            assert d['distance_status'] == d['current_status'] == 'unavailable'
         collect(2)
         telemetry = [f for f in frames if f.get('type') == 'telemetry']
         assert len(telemetry) >= 10
@@ -92,19 +103,24 @@ def main():
         assert all(f[k] is None for f in telemetry for k in
                    ('angles_deg', 'distance_mm', 'current_ma', 'gripper_percent'))
         assert telemetry[-1]['state'] == 'ERROR'
+        if options.milestone == 'm3':
+            assert all(t['execution']['backend'] == 'disabled' and
+                       t['execution']['axes_configured'] == 0 for t in telemetry)
+            assert telemetry[-1]['execution']['phase'] == 'error'
+            assert telemetry[-1]['execution']['fault'] == 'emergency'
         periods = [b['uptime_ms'] - a['uptime_ms']
                    for a, b in zip(telemetry, telemetry[1:])]
         assert periods and all(450 <= ms <= 750 for ms in periods), periods
         assert not any(t in ''.join(raw) for t in ('Guru Meditation', 'Brownout', 'abort()', 'Falha de inicializacao'))
-        result = {'status': 'PASS', 'checks': checks, 'telemetry_frames': len(telemetry),
+        result = {'milestone': options.milestone, 'status': 'PASS', 'checks': checks, 'telemetry_frames': len(telemetry),
                   'final_state': telemetry[-1]['state'], 'diagnostic': diagnostic['diagnostic'],
                   'telemetry_period_ms_min': min(periods),
                   'telemetry_period_ms_max': max(periods)}
         print(json.dumps(result, ensure_ascii=False))
-        (output / 'm2-result.json').write_text(json.dumps(result, indent=2) + '\n')
+        (output / f'{options.milestone}-result.json').write_text(json.dumps(result, indent=2) + '\n')
     finally:
         port.close()
-        (output / 'm2-serial.txt').write_text('\n'.join(line.rstrip() for line in ''.join(raw).splitlines()) + '\n')
+        (output / f'{options.milestone}-serial.txt').write_text('\n'.join(line.rstrip() for line in ''.join(raw).splitlines()) + '\n')
 
 
 if __name__ == '__main__':

@@ -2,6 +2,10 @@ idf_component_register(
     SRCS
         "app_main.c"
         "bench_control.c"
+        "motion_model.c"
+        "sensor_data.c"
+        "cycle_sequence.c"
+        "robot_runtime.c"
         "serial_protocol.c"
         "command_control.c"
         "serial_control.c"

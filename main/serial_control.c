@@ -2,6 +2,7 @@
 #include "serial_protocol.h"
 #include "command_control.h"
 #include "led_control.h"
+#include "robot_runtime.h"
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
 #include "esp_timer.h"
@@ -76,16 +77,27 @@ static void send_response(const response_t *response) {
     bool ok = message->error == PROTOCOL_OK && response->result == COMMAND_ACCEPTED;
     char id[16] = "null";
     if (message->id_valid) snprintf(id, sizeof(id), "%" PRIu32, message->id);
-    char diagnostic[320] = "";
+    char diagnostic[640] = "";
     if (message->error == PROTOCOL_OK && message->command == COMMAND_DIAGNOSTIC) {
-        snprintf(diagnostic, sizeof(diagnostic),
+        robot_runtime_status_t runtime = robot_runtime_status(esp_timer_get_time() / 1000);
+        int written = snprintf(diagnostic, sizeof(diagnostic),
                  ",\"diagnostic\":{\"transport\":\"usb_serial_jtag\","
                  "\"max_line_bytes\":%d,\"frame_timeout_ms\":%d,"
                  "\"rx_messages\":%" PRIu32 ",\"protocol_errors\":%" PRIu32
-                 ",\"dropped_responses\":%" PRIu32 ",\"estop_configured\":%s}",
+                 ",\"dropped_responses\":%" PRIu32 ",\"estop_configured\":%s,"
+                 "\"backend\":\"disabled\",\"axes_configured\":%u,"
+                 "\"sequence_phase\":\"%s\",\"sequence_fault\":\"%s\","
+                 "\"distance_status\":\"%s\",\"current_status\":\"%s\"}",
                  SERIAL_LINE_MAX, SERIAL_FRAME_TIMEOUT_MS, rx_messages,
                  protocol_errors, dropped_responses,
-                 CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false");
+                 CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
+                 runtime.axes_configured, cycle_phase_name(runtime.phase), cycle_fault_name(runtime.fault),
+                 sensor_status_name(runtime.distance_status), sensor_status_name(runtime.current_status));
+        if (written < 0 || (size_t)written >= sizeof(diagnostic)) {
+            diagnostic[0] = '\0';
+            code = "internal_error";
+            ok = false;
+        }
     }
     printf("{\"type\":\"response\",\"version\":1,\"id\":%s,\"ok\":%s,"
            "\"code\":\"%s\",\"state\":\"%s\",\"state_code\":%d,"
@@ -105,6 +117,7 @@ void serial_control_poll(robot_state_t *state) {
         if (serial_parser_feed(&parser, data[i], now, &message))
             accept_message(&message, state);
     }
+    robot_runtime_poll(state, now);
     /* Process bounded RX, including emergency, before emitting one reply. */
     if (count) {
         send_response(&responses[head]);

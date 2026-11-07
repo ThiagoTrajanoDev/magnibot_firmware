@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "serial_control.h"
+#include "robot_runtime.h"
 #include "driver/usb_serial_jtag.h"
 
 static const char *input;
@@ -38,6 +39,13 @@ static void feed(const char *text) {
     do { serial_control_poll(&state); now += 10; } while (remaining);
 }
 int main(void) {
+    assert(robot_runtime_init());robot_state_t probe=ROBOT_IDLE;
+    robot_runtime_poll(&probe,0);robot_runtime_status_t status=robot_runtime_status(0);
+    assert(probe==ROBOT_IDLE && status.axes_configured==0 && status.distance_status==SENSOR_UNAVAILABLE);
+    probe=ROBOT_ERROR;robot_runtime_poll(&probe,10);status=robot_runtime_status(10);
+    assert(probe==ROBOT_ERROR && status.phase==CYCLE_ERROR && status.fault==CYCLE_EMERGENCY);
+    probe=ROBOT_IDLE;robot_runtime_poll(&probe,20);assert(probe==ROBOT_ERROR);
+    assert(robot_runtime_init());
     serial_control_poll(NULL);
     assert(serial_control_init() == ESP_ERR_INVALID_ARG);
     install_result = ESP_OK;

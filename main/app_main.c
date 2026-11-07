@@ -10,6 +10,7 @@
 #include "led_control.h"
 #include "bench_control.h"
 #include "serial_control.h"
+#include "robot_runtime.h"
 
 static const char *TAG = "MAGNIBOT";
 static portMUX_TYPE emergency_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -47,15 +48,16 @@ static esp_err_t emergency_init(void) {
 
 void app_main(void) {
     robot_state_t state = ROBOT_IDLE;
+    bool runtime_ok = robot_runtime_init();
     button_control_t start = {0};
     bool button_ok = button_control_init(&start, BTN_START_GPIO) == ESP_OK;
     esp_err_t led_err = led_control_init();
     esp_err_t emergency_err = emergency_init();
     esp_err_t serial_err = serial_control_init();
-    if (!button_ok || led_err != ESP_OK || emergency_err != ESP_OK || serial_err != ESP_OK) {
+    if (!runtime_ok || !button_ok || led_err != ESP_OK || emergency_err != ESP_OK || serial_err != ESP_OK) {
         bench_control_event(&state, EVENT_EMERGENCY);
-        ESP_LOGE(TAG, "Falha de inicializacao: button=%d led=%s estop=%s serial=%s",
-                 button_ok, esp_err_to_name(led_err), esp_err_to_name(emergency_err), esp_err_to_name(serial_err));
+        ESP_LOGE(TAG, "Falha de inicializacao: runtime=%d button=%d led=%s estop=%s serial=%s",
+                 runtime_ok, button_ok, esp_err_to_name(led_err), esp_err_to_name(emergency_err), esp_err_to_name(serial_err));
     }
     ESP_LOGW(TAG, "BANCADA: movimento bloqueado; sensores ausentes; estop_gpio=%d",
              CONFIG_MAGNIBOT_ESTOP_GPIO);
@@ -67,6 +69,7 @@ void app_main(void) {
         portEXIT_CRITICAL(&emergency_lock);
         if (emergency && bench_control_event(&state, EVENT_EMERGENCY))
             led_control_update(state);
+        robot_runtime_poll(&state, esp_timer_get_time() / 1000);
         serial_control_poll(&state);
         robot_event_t event;
         if (button_ok && button_control_update(&start, &event)) {
@@ -75,12 +78,15 @@ void app_main(void) {
         }
         int64_t now = esp_timer_get_time() / 1000;
         if (now >= next_telemetry) {
+            robot_runtime_status_t runtime = robot_runtime_status(now);
             printf("{\"type\":\"telemetry\",\"version\":1,\"uptime_ms\":%" PRId64
                    ",\"state\":\"%s\",\"state_code\":%d,\"mode\":\"bench\",\"motion_enabled\":false,"
                    "\"estop_configured\":%s,\"angles_deg\":null,\"distance_mm\":null,"
-                   "\"current_ma\":null,\"gripper_percent\":null}\n",
+                   "\"current_ma\":null,\"gripper_percent\":null,\"execution\":{\"backend\":\"disabled\","
+                   "\"axes_configured\":%u,\"phase\":\"%s\",\"fault\":\"%s\"}}\n",
                    now, state_machine_get_name(state), state,
-                   CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false");
+                   CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
+                   runtime.axes_configured, cycle_phase_name(runtime.phase), cycle_fault_name(runtime.fault));
             next_telemetry = now + 500;
         }
         vTaskDelay(pdMS_TO_TICKS(10));
