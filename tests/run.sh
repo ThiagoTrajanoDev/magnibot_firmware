@@ -11,3 +11,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Imain tests/test_state.c main/state_machine.c main/bench_control.c \
     -o "$test_dir/test_state"
 "$test_dir/test_state"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
+    -Imain tests/test_protocol.c main/serial_protocol.c main/command_control.c \
+    main/bench_control.c main/state_machine.c -o "$test_dir/test_protocol"
+"$test_dir/test_protocol"
