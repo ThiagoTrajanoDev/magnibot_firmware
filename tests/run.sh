@@ -7,3 +7,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Itests/stubs -Imain tests/test_button.c main/button_control.c \
     -o "$test_dir/test_button"
 "$test_dir/test_button"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
+    -Imain tests/test_state.c main/state_machine.c main/bench_control.c \
+    -o "$test_dir/test_state"
+"$test_dir/test_state"

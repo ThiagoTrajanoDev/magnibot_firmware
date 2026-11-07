@@ -2,8 +2,9 @@
 #define LED_CONTROL_H
 
 #include "state_machine.h"
+#include "esp_err.h"
 
-void led_control_init(void);
+esp_err_t led_control_init(void);
 
 void led_control_update(robot_state_t state);
 

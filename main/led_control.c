@@ -17,21 +17,19 @@ static void set_color(uint8_t red, uint8_t green, uint8_t blue) {
         return;
     }
 
-    ESP_ERROR_CHECK(
-        led_strip_set_pixel(
+    esp_err_t err = led_strip_set_pixel(
             led_strip,
             0,
             red,
             green,
             blue
-        )
-    );
-
-    ESP_ERROR_CHECK(led_strip_refresh(led_strip));
+        );
+    if (err == ESP_OK) err = led_strip_refresh(led_strip);
+    if (err != ESP_OK) ESP_LOGE(TAG, "LED: %s", esp_err_to_name(err));
 }
 
 // Inicializa o WS2812
-void led_control_init(void) {
+esp_err_t led_control_init(void) {
 
     led_strip_config_t strip_config = {
         .strip_gpio_num = WS2812_GPIO,
@@ -49,17 +47,18 @@ void led_control_init(void) {
         .flags.with_dma = false
     };
 
-    ESP_ERROR_CHECK(
-        led_strip_new_rmt_device(
+    esp_err_t err = led_strip_new_rmt_device(
             &strip_config,
             &rmt_config,
             &led_strip
-        )
-    );
+        );
+    if (err != ESP_OK) return err;
 
-    led_control_clear();
+    err = led_strip_clear(led_strip);
+    if (err != ESP_OK) return err;
 
     ESP_LOGI(TAG, "WS2812 inicializado");
+    return ESP_OK;
 }
 
 // Atualiza a cor conforme o estado do robo
@@ -84,7 +83,7 @@ void led_control_update(robot_state_t state) {
 
         case ROBOT_RUN_DESLOCAMENTO:
             // Roxo
-            set_color(128, 0, 255);
+            set_color(255, 0, 255);
             break;
 
         case ROBOT_ERROR:
@@ -102,6 +101,7 @@ void led_control_update(robot_state_t state) {
 void led_control_clear(void) {
 
     if (led_strip != NULL) {
-        ESP_ERROR_CHECK(led_strip_clear(led_strip));
+        esp_err_t err = led_strip_clear(led_strip);
+        if (err != ESP_OK) ESP_LOGE(TAG, "LED clear: %s", esp_err_to_name(err));
     }
 }

@@ -1,0 +1,9 @@
+menu "MagniBot bancada"
+config MAGNIBOT_ESTOP_GPIO
+    int "GPIO de emergencia validado (-1 = nao conectado)"
+    range -1 48
+    default -1
+    help
+        Botao ativo baixo com pull-up. Escolha somente apos validar a placa
+        e a ligacao. Esta entrada nao substitui o corte fisico de potencia.
+endmenu

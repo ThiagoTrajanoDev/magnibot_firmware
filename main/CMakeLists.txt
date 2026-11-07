@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "app_main.c"
+        "bench_control.c"
         "state_machine.c"
         "button_control.c"
         "led_control.c"
