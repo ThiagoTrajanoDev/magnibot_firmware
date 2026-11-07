@@ -10,19 +10,13 @@
       "name": "default",
       "displayName": "Default (development)",
       "description": "Development configuration",
-      "binaryDir": "${sourceDir}/build/default",
-      "cacheVariables": {
-        "SDKCONFIG": "${sourceDir}/build/default/sdkconfig"
-      }
+      "binaryDir": "build/default"
     },
     {
       "name": "production",
       "displayName": "Production",
       "description": "Production configuration",
-      "binaryDir": "${sourceDir}/build/production",
-      "cacheVariables": {
-        "SDKCONFIG": "${sourceDir}/build/production/sdkconfig"
-      }
+      "binaryDir": "build/production"
     }
   ]
 }
