@@ -42,8 +42,10 @@ int main(void) {
     assert(robot_runtime_init());robot_state_t probe=ROBOT_IDLE;
     robot_runtime_poll(&probe,0);robot_runtime_status_t status=robot_runtime_status(0);
     assert(probe==ROBOT_IDLE && status.axes_configured==0 && status.distance_status==SENSOR_UNAVAILABLE);
+    assert(status.distance_io==IO_DISABLED && status.current_io==IO_DISABLED && status.actuator_io==IO_BLOCKED);
     probe=ROBOT_ERROR;robot_runtime_poll(&probe,10);status=robot_runtime_status(10);
     assert(probe==ROBOT_ERROR && status.phase==CYCLE_ERROR && status.fault==CYCLE_EMERGENCY);
+    assert(status.distance_io==IO_LATCHED && status.current_io==IO_LATCHED && status.actuator_io==IO_LATCHED);
     probe=ROBOT_IDLE;robot_runtime_poll(&probe,20);assert(probe==ROBOT_ERROR);
     assert(robot_runtime_init());
     serial_control_poll(NULL);

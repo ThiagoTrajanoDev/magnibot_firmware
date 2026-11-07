@@ -87,12 +87,15 @@ static void send_response(const response_t *response) {
                  ",\"dropped_responses\":%" PRIu32 ",\"estop_configured\":%s,"
                  "\"backend\":\"disabled\",\"axes_configured\":%u,"
                  "\"sequence_phase\":\"%s\",\"sequence_fault\":\"%s\","
-                 "\"distance_status\":\"%s\",\"current_status\":\"%s\"}",
+                 "\"distance_status\":\"%s\",\"current_status\":\"%s\","
+                 "\"distance_io\":\"%s\",\"current_io\":\"%s\",\"actuator_io\":\"%s\"}",
                  SERIAL_LINE_MAX, SERIAL_FRAME_TIMEOUT_MS, rx_messages,
                  protocol_errors, dropped_responses,
                  CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
                  runtime.axes_configured, cycle_phase_name(runtime.phase), cycle_fault_name(runtime.fault),
-                 sensor_status_name(runtime.distance_status), sensor_status_name(runtime.current_status));
+                 sensor_status_name(runtime.distance_status), sensor_status_name(runtime.current_status),
+                 hardware_result_name(runtime.distance_io), hardware_result_name(runtime.current_io),
+                 hardware_result_name(runtime.actuator_io));
         if (written < 0 || (size_t)written >= sizeof(diagnostic)) {
             diagnostic[0] = '\0';
             code = "internal_error";

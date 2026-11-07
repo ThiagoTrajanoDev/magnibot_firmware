@@ -19,7 +19,8 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Itests/stubs -Imain tests/test_serial_control.c main/serial_control.c \
     main/serial_protocol.c main/command_control.c main/bench_control.c \
     main/state_machine.c main/robot_runtime.c main/motion_model.c main/sensor_data.c \
-    main/cycle_sequence.c -lm -o "$test_dir/test_serial_control"
+    main/cycle_sequence.c main/hardware_io.c main/sensor_interface.c \
+    main/actuator_interface.c -lm -o "$test_dir/test_serial_control"
 "$test_dir/test_serial_control"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Imain tests/test_motion.c main/motion_model.c main/sensor_data.c \

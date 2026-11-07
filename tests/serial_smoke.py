@@ -12,7 +12,7 @@ def main():
     args = argparse.ArgumentParser()
     args.add_argument('--port', required=True)
     args.add_argument('--output-dir', required=True)
-    args.add_argument('--milestone', choices=('m2', 'm3'), default='m2')
+    args.add_argument('--milestone', choices=('m2', 'm3', 'm4a'), default='m2')
     options = args.parse_args()
     output = Path(options.output_dir).resolve()
     firmware = Path(__file__).resolve().parents[1]
@@ -62,11 +62,14 @@ def main():
         collect(2)
         response(b'MB1 1 status\n', 'ok', 1, 'IDLE')
         initial_diagnostic = response(b'MB1 2 diagnostic\r\n', 'ok', 2, 'IDLE')
-        if options.milestone == 'm3':
+        if options.milestone in ('m3', 'm4a'):
             d = initial_diagnostic['diagnostic']
             assert d['backend'] == 'disabled' and d['axes_configured'] == 0
             assert d['sequence_phase'] == 'idle' and d['sequence_fault'] == 'none'
             assert d['distance_status'] == d['current_status'] == 'unavailable'
+            if options.milestone == 'm4a':
+                assert d['distance_io'] == d['current_io'] == 'disabled'
+                assert d['actuator_io'] == 'blocked'
         for ident, command in enumerate(('start', 'confirm', 'rescan'), 3):
             response(f'MB1 {ident} {command}\n'.encode(), 'motion_blocked', ident, 'IDLE')
         port.write(b'MB1 6 sta')
@@ -91,11 +94,13 @@ def main():
         diagnostic = response(b'MB1 19 diagnostic\n', 'ok', 19, 'ERROR')
         assert diagnostic['diagnostic']['protocol_errors'] > 0
         assert diagnostic['diagnostic']['dropped_responses'] > 0
-        if options.milestone == 'm3':
+        if options.milestone in ('m3', 'm4a'):
             d = diagnostic['diagnostic']
             assert d['backend'] == 'disabled' and d['axes_configured'] == 0
             assert d['sequence_phase'] == 'error' and d['sequence_fault'] == 'emergency'
             assert d['distance_status'] == d['current_status'] == 'unavailable'
+            if options.milestone == 'm4a':
+                assert d['distance_io'] == d['current_io'] == d['actuator_io'] == 'latched'
         collect(2)
         telemetry = [f for f in frames if f.get('type') == 'telemetry']
         assert len(telemetry) >= 10
@@ -103,7 +108,7 @@ def main():
         assert all(f[k] is None for f in telemetry for k in
                    ('angles_deg', 'distance_mm', 'current_ma', 'gripper_percent'))
         assert telemetry[-1]['state'] == 'ERROR'
-        if options.milestone == 'm3':
+        if options.milestone in ('m3', 'm4a'):
             assert all(t['execution']['backend'] == 'disabled' and
                        t['execution']['axes_configured'] == 0 for t in telemetry)
             assert telemetry[-1]['execution']['phase'] == 'error'
