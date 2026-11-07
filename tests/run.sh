@@ -20,3 +20,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     main/serial_protocol.c main/command_control.c main/bench_control.c \
     main/state_machine.c -o "$test_dir/test_serial_control"
 "$test_dir/test_serial_control"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
+    -Imain tests/test_motion.c main/motion_model.c main/sensor_data.c \
+    -lm -o "$test_dir/test_motion"
+"$test_dir/test_motion"
