@@ -13,12 +13,13 @@ static int64_t get_time_ms(void) {
     return esp_timer_get_time() / 1000;
 }
 
-void button_control_init(button_control_t *button, gpio_num_t gpio) {
+esp_err_t button_control_init(button_control_t *button, gpio_num_t gpio) {
 
     if (button == NULL) {
-        return;
+        return ESP_ERR_INVALID_ARG;
     }
 
+    if (!GPIO_IS_VALID_GPIO(gpio)) return ESP_ERR_INVALID_ARG;
     button->gpio = gpio;
 
     button->estado_candidato = 1;
@@ -40,9 +41,11 @@ void button_control_init(button_control_t *button, gpio_num_t gpio) {
         .intr_type = GPIO_INTR_DISABLE
     };
 
-    gpio_config(&config);
+    esp_err_t err = gpio_config(&config);
+    if (err != ESP_OK) return err;
 
     ESP_LOGI(TAG, "Botao inicializado no GPIO %d", gpio);
+    return ESP_OK;
 }
 
 bool button_control_update(
@@ -54,10 +57,11 @@ bool button_control_update(
         return false;
     }
 
-    int64_t agora = get_time_ms();
+    return button_control_sample(button, gpio_get_level(button->gpio), get_time_ms(), event);
+}
 
-    // Leitura fisica
-    int leitura = gpio_get_level(button->gpio);
+bool button_control_sample(button_control_t *button, int leitura, int64_t agora, robot_event_t *event) {
+    if (!button || !event || (leitura != 0 && leitura != 1)) return false;
 
     // Detecta mudanca no candidato
     if (leitura != button->estado_candidato) {
@@ -139,6 +143,7 @@ bool button_control_update(
     // Expirou o tempo para um segundo clique
     if (
         button->aguardando_segundo_clique &&
+        button->estado_estavel == 1 &&
         (agora - button->tempo_primeiro_clique)
             >= BUTTON_DOUBLE_CLICK_MS
     ) {

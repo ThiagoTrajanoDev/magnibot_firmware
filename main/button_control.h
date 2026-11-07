@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "driver/gpio.h"
+#include "esp_err.h"
 #include "state_machine.h"
 
 // Tempos em milissegundos
@@ -35,7 +36,9 @@ typedef struct {
 } button_control_t;
 
 // Inicializa o botao
-void button_control_init(button_control_t *button, gpio_num_t gpio);
+esp_err_t button_control_init(button_control_t *button, gpio_num_t gpio);
+
+bool button_control_sample(button_control_t *button, int level, int64_t now_ms, robot_event_t *event);
 
 // Atualiza a leitura e retorna um evento quando identificado
 bool button_control_update(

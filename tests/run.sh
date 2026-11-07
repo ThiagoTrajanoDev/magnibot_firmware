@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+test_dir=$(mktemp -d /tmp/magnibot-tests.XXXXXX)
+trap 'rm -rf "$test_dir"' EXIT
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
+    -Itests/stubs -Imain tests/test_button.c main/button_control.c \
+    -o "$test_dir/test_button"
+"$test_dir/test_button"
