@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#error "tests rely on assert() side effects; do not build with NDEBUG"
+#endif
 #include <assert.h>
 #include <float.h>
 #include <math.h>
@@ -75,5 +78,17 @@ int main(void) {
     assert(!sensor_sample_update(&data.current_ma,10,202,SENSOR_TEST,false));
     assert(!sensor_sample_update(&data.current_ma,-1,203,SENSOR_TEST,true));
     assert(!sensor_sample_update(&data.current_ma,1,203,SENSOR_NONE,true));
+    /* Same timestamp = replay, rejected; an older/equal sample never lowers the watermark. */
+    sensor_data_init(&data);
+    assert(sensor_sample_update(&data.distance_mm,5,0,SENSOR_TEST,true));
+    assert(!sensor_sample_update(&data.distance_mm,5,0,SENSOR_TEST,true));
+    assert(sensor_sample_check(&data.distance_mm,0,100,SENSOR_TEST)==SENSOR_INVALID);
+    assert(sensor_sample_update(&data.distance_mm,5,1,SENSOR_TEST,true));
+    assert(!sensor_sample_update(&data.distance_mm,5,1,SENSOR_TEST,true));
+    assert(sensor_sample_update(&data.distance_mm,5,2,SENSOR_TEST,true));
+    /* A first invalid sample does not consume the first-sample allowance. */
+    sensor_data_init(&data);
+    assert(!sensor_sample_update(&data.distance_mm,NAN,7,SENSOR_TEST,true));
+    assert(sensor_sample_update(&data.distance_mm,5,7,SENSOR_TEST,true));
     puts("PASS: locked defaults, atomic limits, interpolation, rate, cancel, timeout, clock, sensor validity/source/age");
 }

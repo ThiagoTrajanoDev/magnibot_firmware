@@ -25,6 +25,10 @@ typedef struct {
 
 void motion_default_limits(axis_limits_t limits[MOTION_AXES]);
 bool motion_model_init(motion_model_t *model, const axis_limits_t limits[MOTION_AXES]);
+bool motion_limits_valid(const axis_limits_t limits[MOTION_AXES]);
+motion_result_t motion_validate_limits(const axis_limits_t limits[MOTION_AXES],
+                                       const float reference[MOTION_AXES],
+                                       const float target[MOTION_AXES]);
 motion_result_t motion_validate_pose(const motion_model_t *model, const float target[MOTION_AXES]);
 motion_result_t motion_begin(motion_model_t *model, const float target[MOTION_AXES], int64_t now_ms, uint32_t timeout_ms);
 motion_state_t motion_tick(motion_model_t *model, int64_t now_ms);

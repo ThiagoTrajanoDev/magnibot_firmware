@@ -38,6 +38,9 @@ static bool valid_plan(const cycle_sequence_t *cycle, const cycle_plan_t *plan) 
     for (unsigned i = 0; i < plan->scan_count; ++i) {
         if (motion_validate_pose(cycle->motion, plan->scan[i]) != MOTION_OK ||
             motion_validate_pose(cycle->motion, plan->pickup[i]) != MOTION_OK) return false;
+        /* The gripper must stay open until the grip phase closes it. */
+        if (plan->scan[i][CYCLE_GRIPPER_AXIS] != plan->gripper_open_deg ||
+            plan->pickup[i][CYCLE_GRIPPER_AXIS] != plan->gripper_open_deg) return false;
     }
     const axis_limits_t *gripper = &cycle->motion->limits[CYCLE_GRIPPER_AXIS];
     return plan->gripper_open_deg >= gripper->min_deg && plan->gripper_open_deg <= gripper->max_deg &&

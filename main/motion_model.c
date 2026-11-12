@@ -6,11 +6,7 @@ void motion_default_limits(axis_limits_t limits[MOTION_AXES]) {
     if (limits) memset(limits, 0, sizeof(axis_limits_t) * MOTION_AXES);
 }
 
-bool motion_model_init(motion_model_t *model, const axis_limits_t limits[MOTION_AXES]) {
-    if (!model) return false;
-    memset(model, 0, sizeof(*model));
-    model->state = MOTION_FAULT;
-    model->fault = MOTION_INVALID;
+bool motion_limits_valid(const axis_limits_t limits[MOTION_AXES]) {
     if (!limits) return false;
     for (unsigned i = 0; i < MOTION_AXES; ++i) {
         const axis_limits_t *v = &limits[i];
@@ -20,6 +16,15 @@ bool motion_model_init(motion_model_t *model, const axis_limits_t limits[MOTION_
             v->max_speed_deg_s < 0 || v->max_speed_deg_s > 180 ||
             (v->configured && v->max_speed_deg_s == 0)) return false;
     }
+    return true;
+}
+
+bool motion_model_init(motion_model_t *model, const axis_limits_t limits[MOTION_AXES]) {
+    if (!model) return false;
+    memset(model, 0, sizeof(*model));
+    model->state = MOTION_FAULT;
+    model->fault = MOTION_INVALID;
+    if (!motion_limits_valid(limits)) return false;
     memcpy(model->limits, limits, sizeof(model->limits));
     for (unsigned i = 0; i < MOTION_AXES; ++i) model->reference[i] = limits[i].home_deg;
     model->state = MOTION_IDLE;
@@ -33,16 +38,21 @@ unsigned motion_configured_axes(const motion_model_t *model) {
     return count;
 }
 
-motion_result_t motion_validate_pose(const motion_model_t *model, const float target[MOTION_AXES]) {
-    if (!model || !target || model->state == MOTION_FAULT) return MOTION_INVALID;
+motion_result_t motion_validate_limits(const axis_limits_t limits[MOTION_AXES],
+                                       const float reference[MOTION_AXES],
+                                       const float target[MOTION_AXES]) {
+    if (!limits || !reference || !target) return MOTION_INVALID;
     for (unsigned i = 0; i < MOTION_AXES; ++i) {
         if (!isfinite(target[i])) return MOTION_INVALID;
-        if (target[i] < model->limits[i].min_deg || target[i] > model->limits[i].max_deg)
-            return MOTION_LIMIT;
-        if (!model->limits[i].configured && target[i] != model->reference[i])
-            return MOTION_UNCONFIGURED;
+        if (target[i] < limits[i].min_deg || target[i] > limits[i].max_deg) return MOTION_LIMIT;
+        if (!limits[i].configured && target[i] != reference[i]) return MOTION_UNCONFIGURED;
     }
     return MOTION_OK;
+}
+
+motion_result_t motion_validate_pose(const motion_model_t *model, const float target[MOTION_AXES]) {
+    if (!model || model->state == MOTION_FAULT) return MOTION_INVALID;
+    return motion_validate_limits(model->limits, model->reference, target);
 }
 
 motion_result_t motion_begin(motion_model_t *model, const float target[MOTION_AXES],

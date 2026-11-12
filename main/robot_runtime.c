@@ -8,9 +8,11 @@ static sensor_data_t sensors;
 static cycle_sequence_t cycle;
 static sensor_interface_t acquisition;
 static actuator_interface_t output;
-static bool initialized;
+static bool attempted, initialized;
 
 bool robot_runtime_init(void) {
+    if (attempted) return false;
+    attempted = true;
     axis_limits_t limits[MOTION_AXES];
     motion_default_limits(limits);
     sensor_data_init(&sensors);
@@ -24,7 +26,7 @@ bool robot_runtime_init(void) {
 
 void robot_runtime_poll(robot_state_t *state, int64_t now_ms) {
     if (!state) return;
-    if (!initialized && !robot_runtime_init()) { *state = ROBOT_ERROR; return; }
+    if (!initialized) { *state = ROBOT_ERROR; return; }
     if (*state == ROBOT_ERROR) {
         actuator_interface_stop(&output);
         sensor_interface_stop(&acquisition);
@@ -32,6 +34,7 @@ void robot_runtime_poll(robot_state_t *state, int64_t now_ms) {
     }
     sensor_interface_poll(&acquisition, now_ms);
     cycle_tick(&cycle, now_ms);
+    /* The cycle phase owns every non-emergency state; bench_control admits only emergencies. */
     *state = cycle_robot_state(&cycle);
     if (*state == ROBOT_ERROR) {
         actuator_interface_stop(&output);
@@ -41,6 +44,7 @@ void robot_runtime_poll(robot_state_t *state, int64_t now_ms) {
 
 robot_runtime_status_t robot_runtime_status(int64_t now_ms) {
     robot_runtime_status_t result = {
+        .backend = actuator_backend_name(output.driver.kind),
         .distance_status = SENSOR_UNAVAILABLE, .current_status = SENSOR_UNAVAILABLE,
         .distance_io = IO_DISABLED, .current_io = IO_DISABLED, .actuator_io = IO_BLOCKED
     };
@@ -50,6 +54,7 @@ robot_runtime_status_t robot_runtime_status(int64_t now_ms) {
     result.distance_io = acquisition.distance.last_result;
     result.current_io = acquisition.current.last_result;
     result.actuator_io = output.last_result;
+    result.actuator_shutdown_confirmed = output.shutdown_confirmed;
     result.phase = cycle.phase;
     result.fault = cycle.fault;
     result.distance_status = sensor_sample_check(&sensors.distance_mm, now_ms, 500, SENSOR_HARDWARE);

@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#error "tests rely on assert() side effects; do not build with NDEBUG"
+#endif
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -70,12 +73,12 @@ int main(void) {
         assert(!cycle_start_scan(&cycle,&plan,now));assert(!cycle_confirm(&cycle,now));
         assert(memcmp(held,model.reference,sizeof(held))==0);
     }
-    setup(); no_object=true;refresh(); assert(cycle_start_scan(&cycle,&plan,now));reach(CYCLE_ERROR);
+    setup(); no_object=true;sensor_data_init(&sensors);refresh(); assert(cycle_start_scan(&cycle,&plan,now));reach(CYCLE_ERROR);
     assert(cycle.fault==CYCLE_NO_OBJECT && model.reference[0]==0);
     setup();contact=false;assert(cycle_start_scan(&cycle,&plan,now));reach(CYCLE_WAIT_CONFIRM);
     assert(cycle_confirm(&cycle,now));reach(CYCLE_ERROR);assert(cycle.fault==CYCLE_NO_CONTACT);
     setup();assert(cycle_start_scan(&cycle,&plan,now));now=10;refresh();
-    sensor_sample_update(&sensors.current_ma,1000,now,SENSOR_TEST,true);cycle_tick(&cycle,now);
+    now=11;sensor_sample_update(&sensors.current_ma,1000,now,SENSOR_TEST,true);cycle_tick(&cycle,now);
     assert(cycle.fault==CYCLE_OVERCURRENT);
     setup();assert(cycle_start_scan(&cycle,&plan,now));now=201;cycle_tick(&cycle,now);
     assert(cycle.fault==CYCLE_SENSOR_FAULT);
@@ -93,6 +96,9 @@ int main(void) {
     setup();plan.map_ttl_ms=10;assert(cycle_start_scan(&cycle,&plan,now));reach(CYCLE_ERROR);
     assert(cycle.fault==CYCLE_MAP_EXPIRED);
     setup();plan.scan[1][1]=NAN;assert(!cycle_start_scan(&cycle,&plan,now));assert(cycle.fault==CYCLE_BAD_PLAN);
+    setup();plan.pickup[1][CYCLE_GRIPPER_AXIS]=5;assert(!cycle_start_scan(&cycle,&plan,now));
+    assert(cycle.fault==CYCLE_BAD_PLAN);
+    setup();plan.scan[0][CYCLE_GRIPPER_AXIS]=5;assert(!cycle_start_scan(&cycle,&plan,now));
     setup();plan.gripper_closed_deg=100;assert(!cycle_start_scan(&cycle,&plan,now));
     setup();plan.step_timeout_ms=10;plan.settle_ms=0;plan.scan[0][0]=90;
     assert(!cycle_start_scan(&cycle,&plan,now));assert(cycle.fault==CYCLE_TIMEOUT);

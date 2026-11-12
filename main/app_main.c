@@ -11,13 +11,16 @@
 #include "bench_control.h"
 #include "serial_control.h"
 #include "robot_runtime.h"
+#include "gpio_policy.h"
+#include "esp_attr.h"
 
 static const char *TAG = "MAGNIBOT";
 static portMUX_TYPE emergency_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool emergency_latched;
 
-/* No PWM driver is present: ISR only latches the request. No 10 us claim. */
-static void __attribute__((unused)) emergency_isr(void *arg) {
+/* No PWM driver is present: ISR only latches the request. No 10 us claim.
+ * Kept in IRAM so it does not depend on the flash cache. */
+static void IRAM_ATTR __attribute__((unused)) emergency_isr(void *arg) {
     (void)arg;
     portENTER_CRITICAL_ISR(&emergency_lock);
     emergency_latched = true;
@@ -27,15 +30,14 @@ static void __attribute__((unused)) emergency_isr(void *arg) {
 static esp_err_t emergency_init(void) {
 #if CONFIG_MAGNIBOT_ESTOP_GPIO >= 0
     const int pin = CONFIG_MAGNIBOT_ESTOP_GPIO;
-    if (!GPIO_IS_VALID_GPIO(pin) || pin == BTN_START_GPIO || pin == WS2812_GPIO)
-        return ESP_ERR_INVALID_ARG;
+    if (!gpio_policy_estop_allowed(pin, BTN_START_GPIO, WS2812_GPIO)) return ESP_ERR_INVALID_ARG;
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << pin, .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE, .intr_type = GPIO_INTR_NEGEDGE
     };
     esp_err_t err = gpio_config(&cfg);
     if (err != ESP_OK) return err;
-    err = gpio_install_isr_service(0);
+    err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (err != ESP_OK) return err;
     err = gpio_isr_handler_add(pin, emergency_isr, NULL);
     if (err != ESP_OK) return err;
@@ -61,32 +63,39 @@ void app_main(void) {
     }
     ESP_LOGW(TAG, "BANCADA: movimento bloqueado; sensores ausentes; estop_gpio=%d",
              CONFIG_MAGNIBOT_ESTOP_GPIO);
-    led_control_update(state);
+    robot_state_t led_state = state;
+    led_control_update(led_state);
     int64_t next_telemetry = 0;
     for (;;) {
         portENTER_CRITICAL(&emergency_lock);
         bool emergency = emergency_latched;
         portEXIT_CRITICAL(&emergency_lock);
-        if (emergency && bench_control_event(&state, EVENT_EMERGENCY))
-            led_control_update(state);
-        robot_runtime_poll(&state, esp_timer_get_time() / 1000);
+        if (emergency) bench_control_event(&state, EVENT_EMERGENCY);
         serial_control_poll(&state);
         robot_event_t event;
-        if (button_ok && button_control_update(&start, &event)) {
-            bench_control_event(&state, event);
-            ESP_LOGW(TAG, "Comando %d bloqueado: bancada sem atuadores validados", event);
-        }
+        bool gesture = button_ok && button_control_update(&start, &event);
+        if (gesture) bench_control_event(&state, event);
         int64_t now = esp_timer_get_time() / 1000;
+        /* Runtime (actuator stop) and LED react before any console output. */
+        robot_runtime_poll(&state, now);
+        if (state != led_state) {
+            led_state = state;
+            led_control_update(state);
+        }
+        if (gesture) ESP_LOGW(TAG, "Comando %d bloqueado: bancada sem atuadores validados", event);
+        serial_control_flush();
         if (now >= next_telemetry) {
             robot_runtime_status_t runtime = robot_runtime_status(now);
             printf("{\"type\":\"telemetry\",\"version\":1,\"uptime_ms\":%" PRId64
-                   ",\"state\":\"%s\",\"state_code\":%d,\"mode\":\"bench\",\"motion_enabled\":false,"
+                   ",\"state\":\"%s\",\"state_code\":%d," ROBOT_MODE_JSON ","
                    "\"estop_configured\":%s,\"angles_deg\":null,\"distance_mm\":null,"
-                   "\"current_ma\":null,\"gripper_percent\":null,\"execution\":{\"backend\":\"disabled\","
-                   "\"axes_configured\":%u,\"phase\":\"%s\",\"fault\":\"%s\"}}\n",
+                   "\"current_ma\":null,\"gripper_percent\":null,\"execution\":{\"backend\":\"%s\","
+                   "\"axes_configured\":%u,\"phase\":\"%s\",\"fault\":\"%s\"},"
+                   "\"stack_min_free_bytes\":%u}\n",
                    now, state_machine_get_name(state), state,
                    CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
-                   runtime.axes_configured, cycle_phase_name(runtime.phase), cycle_fault_name(runtime.fault));
+                   runtime.backend, runtime.axes_configured, cycle_phase_name(runtime.phase),
+                   cycle_fault_name(runtime.fault), (unsigned)uxTaskGetStackHighWaterMark(NULL));
             next_telemetry = now + 500;
         }
         vTaskDelay(pdMS_TO_TICKS(10));

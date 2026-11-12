@@ -1,7 +1,6 @@
 #include "serial_control.h"
 #include "serial_protocol.h"
 #include "command_control.h"
-#include "led_control.h"
 #include "robot_runtime.h"
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
@@ -52,9 +51,7 @@ static void accept_message(const protocol_message_t *message, robot_state_t *sta
     command_result_t result = COMMAND_INVALID;
     increment(&rx_messages);
     if (message->error == PROTOCOL_OK) {
-        robot_state_t previous = *state;
         result = command_control_execute(state, message->command);
-        if (*state != previous) led_control_update(*state);
     } else {
         increment(&protocol_errors);
     }
@@ -85,13 +82,14 @@ static void send_response(const response_t *response) {
                  "\"max_line_bytes\":%d,\"frame_timeout_ms\":%d,"
                  "\"rx_messages\":%" PRIu32 ",\"protocol_errors\":%" PRIu32
                  ",\"dropped_responses\":%" PRIu32 ",\"estop_configured\":%s,"
-                 "\"backend\":\"disabled\",\"axes_configured\":%u,"
+                 "\"backend\":\"%s\",\"actuator_shutdown_confirmed\":%s,\"axes_configured\":%u,"
                  "\"sequence_phase\":\"%s\",\"sequence_fault\":\"%s\","
                  "\"distance_status\":\"%s\",\"current_status\":\"%s\","
                  "\"distance_io\":\"%s\",\"current_io\":\"%s\",\"actuator_io\":\"%s\"}",
                  SERIAL_LINE_MAX, SERIAL_FRAME_TIMEOUT_MS, rx_messages,
                  protocol_errors, dropped_responses,
                  CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
+                 runtime.backend, runtime.actuator_shutdown_confirmed ? "true" : "false",
                  runtime.axes_configured, cycle_phase_name(runtime.phase), cycle_fault_name(runtime.fault),
                  sensor_status_name(runtime.distance_status), sensor_status_name(runtime.current_status),
                  hardware_result_name(runtime.distance_io), hardware_result_name(runtime.current_io),
@@ -104,7 +102,7 @@ static void send_response(const response_t *response) {
     }
     printf("{\"type\":\"response\",\"version\":1,\"id\":%s,\"ok\":%s,"
            "\"code\":\"%s\",\"state\":\"%s\",\"state_code\":%d,"
-           "\"mode\":\"bench\",\"motion_enabled\":false%s}\n",
+           ROBOT_MODE_JSON "%s}\n",
            id, ok ? "true" : "false", code,
            state_machine_get_name(response->state), response->state, diagnostic);
 }
@@ -120,8 +118,10 @@ void serial_control_poll(robot_state_t *state) {
         if (serial_parser_feed(&parser, data[i], now, &message))
             accept_message(&message, state);
     }
-    robot_runtime_poll(state, now);
-    /* Process bounded RX, including emergency, before emitting one reply. */
+}
+
+void serial_control_flush(void) {
+    if (!initialized) return;
     if (count) {
         send_response(&responses[head]);
         head = (head + 1) % RESPONSE_CAPACITY;

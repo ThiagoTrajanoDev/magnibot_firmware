@@ -8,7 +8,7 @@ typedef struct {
     float value;
     int64_t timestamp_ms, newest_ms;
     sensor_source_t source;
-    bool received, valid;
+    bool received, valid, accepted;
 } sensor_sample_t;
 typedef struct { sensor_sample_t distance_mm, current_ma; } sensor_data_t;
 void sensor_data_init(sensor_data_t *data);

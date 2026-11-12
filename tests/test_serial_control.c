@@ -1,4 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
+#ifdef NDEBUG
+#error "tests rely on assert() side effects; do not build with NDEBUG"
+#endif
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +14,6 @@
 static const char *input;
 static size_t remaining;
 static int64_t now;
-static unsigned led_updates;
 static bool driver_installed;
 static esp_err_t install_result = ESP_ERR_INVALID_ARG;
 static robot_state_t state = ROBOT_IDLE;
@@ -29,24 +31,12 @@ int usb_serial_jtag_read_bytes(void *data, uint32_t size, uint32_t wait) {
     if (n) { memcpy(data, input, n); input += n; remaining -= n; }
     return (int)n;
 }
-void led_control_update(robot_state_t updated) {
-    assert(updated == ROBOT_ERROR);
-    ++led_updates;
-}
 static void feed(const char *text) {
     assert(remaining == 0);
     input = text; remaining = strlen(text);
-    do { serial_control_poll(&state); now += 10; } while (remaining);
+    do { serial_control_poll(&state); serial_control_flush(); now += 10; } while (remaining);
 }
 int main(void) {
-    assert(robot_runtime_init());robot_state_t probe=ROBOT_IDLE;
-    robot_runtime_poll(&probe,0);robot_runtime_status_t status=robot_runtime_status(0);
-    assert(probe==ROBOT_IDLE && status.axes_configured==0 && status.distance_status==SENSOR_UNAVAILABLE);
-    assert(status.distance_io==IO_DISABLED && status.current_io==IO_DISABLED && status.actuator_io==IO_BLOCKED);
-    probe=ROBOT_ERROR;robot_runtime_poll(&probe,10);status=robot_runtime_status(10);
-    assert(probe==ROBOT_ERROR && status.phase==CYCLE_ERROR && status.fault==CYCLE_EMERGENCY);
-    assert(status.distance_io==IO_LATCHED && status.current_io==IO_LATCHED && status.actuator_io==IO_LATCHED);
-    probe=ROBOT_IDLE;robot_runtime_poll(&probe,20);assert(probe==ROBOT_ERROR);
     assert(robot_runtime_init());
     serial_control_poll(NULL);
     assert(serial_control_init() == ESP_ERR_INVALID_ARG);
@@ -68,11 +58,11 @@ int main(void) {
     /* Saturate response queue; emergency still executes even with no reply slot. */
     feed("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
     feed("\nMB1 4 estop\nMB1 5 start\n");
-    assert(state == ROBOT_ERROR && led_updates == 1);
-    for (int i = 0; i < 20; ++i) serial_control_poll(&state);
+    assert(state == ROBOT_ERROR);
+    for (int i = 0; i < 20; ++i) { serial_control_poll(&state); serial_control_flush(); }
     feed("MB1 6 diagnostic\nMB1 7 estop\nMB1 8 start\n");
-    for (int i = 0; i < 4; ++i) serial_control_poll(&state);
-    assert(led_updates == 1 && state == ROBOT_ERROR);
+    for (int i = 0; i < 4; ++i) { serial_control_poll(&state); serial_control_flush(); }
+    assert(state == ROBOT_ERROR);
     fflush(stdout);
     assert(dup2(original_stdout, STDOUT_FILENO) >= 0);
     close(original_stdout);
@@ -84,6 +74,7 @@ int main(void) {
     assert(strstr(output, "\"code\":\"motion_blocked\""));
     assert(strstr(output, "\"code\":\"timeout\""));
     assert(strstr(output, "\"diagnostic\":{"));
+    assert(strstr(output, "\"backend\":\"disabled\",\"actuator_shutdown_confirmed\":false"));
     const char *dropped = strstr(output, "\"dropped_responses\":");
     assert(dropped && strtoul(dropped + strlen("\"dropped_responses\":"), NULL, 10) > 0);
     assert(strstr(output, "\"id\":8,\"ok\":false,\"code\":\"emergency_latched\""));

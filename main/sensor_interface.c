@@ -11,7 +11,8 @@ static bool valid_driver(const sensor_driver_t *driver) {
 bool sensor_interface_init(sensor_interface_t *interface, sensor_data_t *data,
                            const sensor_driver_t *distance, const sensor_driver_t *current,
                            uint32_t period_ms, uint32_t timeout_ms, uint32_t max_age_ms) {
-    if (!interface) return false;
+    /* An initialised interface (possibly stopped/latched) is never silently reset. */
+    if (!interface || interface->initialized) return false;
     memset(interface, 0, sizeof(*interface));
     interface->stopped = true;
     if (!data || !period_ms || !timeout_ms || !max_age_ms ||
