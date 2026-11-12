@@ -23,6 +23,9 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     main/actuator_interface.c -lm -o "$test_dir/test_serial_control"
 "$test_dir/test_serial_control"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
+    -Imain tests/test_gpio_policy.c main/gpio_policy.c -o "$test_dir/test_gpio_policy"
+"$test_dir/test_gpio_policy"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Imain tests/test_motion.c main/motion_model.c main/sensor_data.c \
     -lm -o "$test_dir/test_motion"
 "$test_dir/test_motion"

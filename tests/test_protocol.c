@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#error "tests rely on assert() side effects; do not build with NDEBUG"
+#endif
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

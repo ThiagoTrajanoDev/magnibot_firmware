@@ -12,6 +12,7 @@ idf_component_register(
         "serial_protocol.c"
         "command_control.c"
         "serial_control.c"
+        "gpio_policy.c"
         "state_machine.c"
         "button_control.c"
         "led_control.c"
