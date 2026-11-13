@@ -12,11 +12,14 @@
 #include "serial_control.h"
 #include "robot_runtime.h"
 #include "gpio_policy.h"
+#include "bench_servo.h"
+#include "servo_pwm.h"
 #include "esp_attr.h"
 
 static const char *TAG = "MAGNIBOT";
 static portMUX_TYPE emergency_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool emergency_latched;
+static bench_servo_t servos;
 
 /* No PWM driver is present: ISR only latches the request. No 10 us claim.
  * Kept in IRAM so it does not depend on the flash cache. */
@@ -48,6 +51,26 @@ static esp_err_t emergency_init(void) {
     return ESP_OK;
 }
 
+/* Servo commands stay refused unless CONFIG_MAGNIBOT_BENCH_SERVO is enabled. */
+static esp_err_t servo_init(void) {
+    bench_servo_config_t config = {
+        .min_us = 600, .max_us = 2400, .max_dps = 90,
+        .start_pin = BTN_START_GPIO, .led_pin = WS2812_GPIO,
+        .estop_pin = CONFIG_MAGNIBOT_ESTOP_GPIO, .base_pin = SERVO_BASE_GPIO
+    };
+    const bench_servo_driver_t *backend = NULL;
+#if CONFIG_MAGNIBOT_BENCH_SERVO
+    static bench_servo_driver_t driver;
+    config.min_us = CONFIG_MAGNIBOT_SERVO_MIN_US;
+    config.max_us = CONFIG_MAGNIBOT_SERVO_MAX_US;
+    config.max_dps = CONFIG_MAGNIBOT_SERVO_MAX_DPS;
+    esp_err_t err = servo_pwm_init(&driver);
+    if (err != ESP_OK) return err;
+    backend = &driver;
+#endif
+    return bench_servo_init(&servos, backend, &config) ? ESP_OK : ESP_ERR_INVALID_ARG;
+}
+
 void app_main(void) {
     robot_state_t state = ROBOT_IDLE;
     bool runtime_ok = robot_runtime_init();
@@ -55,14 +78,17 @@ void app_main(void) {
     bool button_ok = button_control_init(&start, BTN_START_GPIO) == ESP_OK;
     esp_err_t led_err = led_control_init();
     esp_err_t emergency_err = emergency_init();
-    esp_err_t serial_err = serial_control_init();
-    if (!runtime_ok || !button_ok || led_err != ESP_OK || emergency_err != ESP_OK || serial_err != ESP_OK) {
+    esp_err_t servo_err = servo_init();
+    esp_err_t serial_err = serial_control_init(&servos);
+    if (!runtime_ok || !button_ok || led_err != ESP_OK || emergency_err != ESP_OK ||
+        servo_err != ESP_OK || serial_err != ESP_OK) {
         bench_control_event(&state, EVENT_EMERGENCY);
-        ESP_LOGE(TAG, "Falha de inicializacao: runtime=%d button=%d led=%s estop=%s serial=%s",
-                 runtime_ok, button_ok, esp_err_to_name(led_err), esp_err_to_name(emergency_err), esp_err_to_name(serial_err));
+        ESP_LOGE(TAG, "Falha de inicializacao: runtime=%d button=%d led=%s estop=%s servo=%s serial=%s",
+                 runtime_ok, button_ok, esp_err_to_name(led_err), esp_err_to_name(emergency_err),
+                 esp_err_to_name(servo_err), esp_err_to_name(serial_err));
     }
-    ESP_LOGW(TAG, "BANCADA: movimento bloqueado; sensores ausentes; estop_gpio=%d",
-             CONFIG_MAGNIBOT_ESTOP_GPIO);
+    ESP_LOGW(TAG, "BANCADA: ciclo bloqueado; sensores ausentes; estop_gpio=%d; servo_bancada=%d",
+             CONFIG_MAGNIBOT_ESTOP_GPIO, bench_servo_enabled(&servos));
     robot_state_t led_state = state;
     led_control_update(led_state);
     int64_t next_telemetry = 0;
@@ -76,7 +102,10 @@ void app_main(void) {
         bool gesture = button_ok && button_control_update(&start, &event);
         if (gesture) bench_control_event(&state, event);
         int64_t now = esp_timer_get_time() / 1000;
-        /* Runtime (actuator stop) and LED react before any console output. */
+        /* Servo slew, runtime (actuator stop) and LED react before any console output. */
+        bench_servo_poll(&servos, now);
+        if (bench_servo_faulted(&servos)) bench_control_event(&state, EVENT_EMERGENCY);
+        if (state == ROBOT_ERROR) bench_servo_stop(&servos);
         robot_runtime_poll(&state, now);
         if (state != led_state) {
             led_state = state;
@@ -91,11 +120,12 @@ void app_main(void) {
                    "\"estop_configured\":%s,\"angles_deg\":null,\"distance_mm\":null,"
                    "\"current_ma\":null,\"gripper_percent\":null,\"execution\":{\"backend\":\"%s\","
                    "\"axes_configured\":%u,\"phase\":\"%s\",\"fault\":\"%s\"},"
-                   "\"stack_min_free_bytes\":%u}\n",
+                   "\"bench_servo\":{\"enabled\":%s,\"channels\":%u},\"stack_min_free_bytes\":%u}\n",
                    now, state_machine_get_name(state), state,
                    CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
                    runtime.backend, runtime.axes_configured, cycle_phase_name(runtime.phase),
-                   cycle_fault_name(runtime.fault), (unsigned)uxTaskGetStackHighWaterMark(NULL));
+                   cycle_fault_name(runtime.fault), bench_servo_enabled(&servos) ? "true" : "false",
+                   bench_servo_channels(&servos), (unsigned)uxTaskGetStackHighWaterMark(NULL));
             next_telemetry = now + 500;
         }
         vTaskDelay(pdMS_TO_TICKS(10));

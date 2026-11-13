@@ -6,4 +6,39 @@ config MAGNIBOT_ESTOP_GPIO
     help
         Botao ativo baixo com pull-up. Escolha somente apos validar a placa
         e a ligacao. Esta entrada nao substitui o corte fisico de potencia.
+
+config MAGNIBOT_BENCH_SERVO
+    bool "Habilitar comandos de servo de bancada (<GPIO> <GRAUS>)"
+    default n
+    help
+        Permite mover servos de 180 graus soltos na bancada pelo terminal serial,
+        com o comando "<GPIO> <GRAUS>". So habilite com o servo fixado, alimentacao
+        externa com terra comum e meio de cortar a alimentacao. O servo da base
+        (giro continuo) e recusado. A emergencia para os pulsos de PWM mas nao e
+        um corte fisico de potencia.
+
+config MAGNIBOT_SERVO_MIN_US
+    int "Largura de pulso em 0 grau (us)"
+    depends on MAGNIBOT_BENCH_SERVO
+    range 400 1500
+    default 600
+    help
+        Valor conservador; calibre com o servo livre para nao forcar o batente.
+
+config MAGNIBOT_SERVO_MAX_US
+    int "Largura de pulso em 180 graus (us)"
+    depends on MAGNIBOT_BENCH_SERVO
+    range 1500 2600
+    default 2400
+    help
+        Valor conservador; calibre com o servo livre para nao forcar o batente.
+
+config MAGNIBOT_SERVO_MAX_DPS
+    int "Velocidade maxima de variacao (graus por segundo)"
+    depends on MAGNIBOT_BENCH_SERVO
+    range 1 360
+    default 90
+    help
+        Limita a rampa entre comandos consecutivos no mesmo GPIO. O primeiro
+        comando de cada GPIO vai direto ao alvo, na velocidade do proprio servo.
 endmenu

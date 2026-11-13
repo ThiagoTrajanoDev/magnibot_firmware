@@ -13,14 +13,14 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
 "$test_dir/test_state"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Imain tests/test_protocol.c main/serial_protocol.c main/command_control.c \
-    main/bench_control.c main/state_machine.c -o "$test_dir/test_protocol"
+    main/bench_control.c main/state_machine.c main/bench_servo.c main/gpio_policy.c -o "$test_dir/test_protocol"
 "$test_dir/test_protocol"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Itests/stubs -Imain tests/test_serial_control.c main/serial_control.c \
     main/serial_protocol.c main/command_control.c main/bench_control.c \
     main/state_machine.c main/robot_runtime.c main/motion_model.c main/sensor_data.c \
     main/cycle_sequence.c main/hardware_io.c main/sensor_interface.c \
-    main/actuator_interface.c -lm -o "$test_dir/test_serial_control"
+    main/actuator_interface.c main/bench_servo.c main/gpio_policy.c -lm -o "$test_dir/test_serial_control"
 "$test_dir/test_serial_control"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Imain tests/test_runtime.c main/robot_runtime.c main/motion_model.c main/sensor_data.c \

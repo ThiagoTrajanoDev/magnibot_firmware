@@ -23,12 +23,13 @@ static response_t responses[RESPONSE_CAPACITY];
 static unsigned head, count;
 static uint32_t rx_messages, protocol_errors, dropped_responses;
 static bool initialized;
+static bench_servo_t *bench_servos;
 
 static void increment(uint32_t *value) {
     if (*value != UINT32_MAX) ++*value;
 }
 
-esp_err_t serial_control_init(void) {
+esp_err_t serial_control_init(bench_servo_t *servos) {
 #if !CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG && !CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     return ESP_ERR_NOT_SUPPORTED;
 #else
@@ -42,6 +43,7 @@ esp_err_t serial_control_init(void) {
     }
     usb_serial_jtag_vfs_use_driver();
     serial_parser_init(&parser);
+    bench_servos = servos;
     initialized = true;
     return ESP_OK;
 #endif
@@ -51,7 +53,9 @@ static void accept_message(const protocol_message_t *message, robot_state_t *sta
     command_result_t result = COMMAND_INVALID;
     increment(&rx_messages);
     if (message->error == PROTOCOL_OK) {
-        result = command_control_execute(state, message->command);
+        result = message->command == COMMAND_SERVO
+            ? command_control_servo(state, bench_servos, message->servo_gpio, message->servo_degrees)
+            : command_control_execute(state, message->command);
     } else {
         increment(&protocol_errors);
     }
@@ -74,7 +78,8 @@ static void send_response(const response_t *response) {
     bool ok = message->error == PROTOCOL_OK && response->result == COMMAND_ACCEPTED;
     char id[16] = "null";
     if (message->id_valid) snprintf(id, sizeof(id), "%" PRIu32, message->id);
-    char diagnostic[640] = "";
+    char diagnostic[768] = "";
+    char servo[64] = "";
     if (message->error == PROTOCOL_OK && message->command == COMMAND_DIAGNOSTIC) {
         robot_runtime_status_t runtime = robot_runtime_status(esp_timer_get_time() / 1000);
         int written = snprintf(diagnostic, sizeof(diagnostic),
@@ -85,7 +90,8 @@ static void send_response(const response_t *response) {
                  "\"backend\":\"%s\",\"actuator_shutdown_confirmed\":%s,\"axes_configured\":%u,"
                  "\"sequence_phase\":\"%s\",\"sequence_fault\":\"%s\","
                  "\"distance_status\":\"%s\",\"current_status\":\"%s\","
-                 "\"distance_io\":\"%s\",\"current_io\":\"%s\",\"actuator_io\":\"%s\"}",
+                 "\"distance_io\":\"%s\",\"current_io\":\"%s\",\"actuator_io\":\"%s\","
+                 "\"bench_servo\":{\"enabled\":%s,\"channels\":%u}}",
                  SERIAL_LINE_MAX, SERIAL_FRAME_TIMEOUT_MS, rx_messages,
                  protocol_errors, dropped_responses,
                  CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
@@ -93,18 +99,22 @@ static void send_response(const response_t *response) {
                  runtime.axes_configured, cycle_phase_name(runtime.phase), cycle_fault_name(runtime.fault),
                  sensor_status_name(runtime.distance_status), sensor_status_name(runtime.current_status),
                  hardware_result_name(runtime.distance_io), hardware_result_name(runtime.current_io),
-                 hardware_result_name(runtime.actuator_io));
+                 hardware_result_name(runtime.actuator_io),
+                 bench_servo_enabled(bench_servos) ? "true" : "false", bench_servo_channels(bench_servos));
         if (written < 0 || (size_t)written >= sizeof(diagnostic)) {
             diagnostic[0] = '\0';
             code = "internal_error";
             ok = false;
         }
     }
+    if (ok && message->command == COMMAND_SERVO)
+        snprintf(servo, sizeof(servo), ",\"servo\":{\"gpio\":%d,\"target_deg\":%d}",
+                 message->servo_gpio, message->servo_degrees);
     printf("{\"type\":\"response\",\"version\":1,\"id\":%s,\"ok\":%s,"
            "\"code\":\"%s\",\"state\":\"%s\",\"state_code\":%d,"
-           ROBOT_MODE_JSON "%s}\n",
+           ROBOT_MODE_JSON "%s%s}\n",
            id, ok ? "true" : "false", code,
-           state_machine_get_name(response->state), response->state, diagnostic);
+           state_machine_get_name(response->state), response->state, servo, diagnostic);
 }
 
 void serial_control_poll(robot_state_t *state) {

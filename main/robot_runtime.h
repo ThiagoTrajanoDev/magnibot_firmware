@@ -3,7 +3,8 @@
 #include "cycle_sequence.h"
 #include <stdbool.h>
 #include "hardware_io.h"
-/* Fixed bench-mode fields shared by every JSON frame; no backend can move yet. */
+/* Fixed bench-mode fields shared by every JSON frame. motion_enabled covers the cycle/actuator
+ * backend only; bench servos (opt-in, Kconfig) are reported separately as "bench_servo". */
 #define ROBOT_MODE_JSON "\"mode\":\"bench\",\"motion_enabled\":false"
 typedef struct {
     const char *backend;

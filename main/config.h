@@ -16,6 +16,8 @@
 
 // GPIOs provisórios dos servos: ainda sem uso nem validação de fiação.
 // Nenhum driver os configura; confirmar pinagem antes de habilitar PWM.
+// Os comandos de servo de bancada aceitam qualquer GPIO permitido por gpio_policy,
+// exceto SERVO_BASE_GPIO (giro continuo).
 #define SERVO_BASE_GPIO       4
 #define SERVO_OMBRO_GPIO      5
 #define SERVO_COTOVELO_GPIO   6

@@ -13,6 +13,8 @@ idf_component_register(
         "command_control.c"
         "serial_control.c"
         "gpio_policy.c"
+        "bench_servo.c"
+        "servo_pwm.c"
         "state_machine.c"
         "button_control.c"
         "led_control.c"
@@ -20,6 +22,7 @@ idf_component_register(
     REQUIRES
         led_strip
         esp_driver_gpio
+        esp_driver_ledc
         esp_timer
         esp_driver_usb_serial_jtag
 )

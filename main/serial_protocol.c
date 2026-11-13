@@ -5,8 +5,34 @@ void serial_parser_init(serial_parser_t *parser) {
     if (parser) memset(parser, 0, sizeof(*parser));
 }
 
+static bool parse_number(const char *text, size_t max_digits, int *value) {
+    size_t digits = strlen(text);
+    if (digits == 0 || digits > max_digits) return false;
+    *value = 0;
+    for (; *text; ++text) {
+        if (*text < '0' || *text > '9') return false;
+        *value = *value * 10 + (*text - '0');
+    }
+    return true;
+}
+
+/* "<gpio> <degrees>": two unsigned decimals; range and pin checks belong to the servo module. */
+static void parse_servo(char *line, protocol_message_t *message) {
+    char *degrees = strchr(line, ' ');
+    if (!degrees) return;
+    *degrees++ = '\0';
+    if (!parse_number(line, 2, &message->servo_gpio) ||
+        !parse_number(degrees, 3, &message->servo_degrees)) return;
+    message->command = COMMAND_SERVO;
+    message->error = PROTOCOL_OK;
+}
+
 static void parse_line(char *line, protocol_message_t *message) {
     *message = (protocol_message_t){.error = PROTOCOL_BAD_FRAME};
+    if (line[0] >= '0' && line[0] <= '9') {
+        parse_servo(line, message);
+        return;
+    }
     char *first = strchr(line, ' ');
     if (!first) return;
     *first++ = '\0';

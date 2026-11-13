@@ -6,6 +6,7 @@
 #include <string.h>
 #include "serial_protocol.h"
 #include "command_control.h"
+#include "bench_servo.h"
 
 static protocol_message_t parse(const char *text) {
     serial_parser_t parser;
@@ -42,18 +43,34 @@ int main(void) {
     m = parse("MB1 37 unknown\n");
     assert(m.id_valid && m.id == 37);
 
+    /* Bare "<gpio> <degrees>" line typed in a terminal (no MB1 frame, no id). */
+    m = parse("5 90\n");
+    assert(m.error == PROTOCOL_OK && m.command == COMMAND_SERVO && !m.id_valid);
+    assert(m.servo_gpio == 5 && m.servo_degrees == 90);
+    m = parse("11 180\r\n");
+    assert(m.error == PROTOCOL_OK && m.servo_gpio == 11 && m.servo_degrees == 180);
+    m = parse("05 000\n");
+    assert(m.error == PROTOCOL_OK && m.servo_gpio == 5 && m.servo_degrees == 0);
+    m = parse("5 999\n");  /* syntax only: the servo module rejects the range */
+    assert(m.error == PROTOCOL_OK && m.servo_degrees == 999);
+    const char *bad_servo[] = {"5\n", "5 \n", "5  90\n", "5 90 1\n", "5 abc\n", "5 -1\n", "5 9.5\n",
+                               "123 90\n", "5 1000\n", "5x 90\n", "5\t90\n", " 5 90\n"};
+    for (unsigned i = 0; i < sizeof(bad_servo) / sizeof(bad_servo[0]); ++i)
+        assert(parse(bad_servo[i]).error != PROTOCOL_OK);
+    assert(parse("-5 90\n").error == PROTOCOL_BAD_VERSION);
+
     serial_parser_t parser;
     serial_parser_init(&parser);
     const char *fragment = "MB1 81 estop";
     for (size_t i = 0; fragment[i]; ++i)
         assert(!serial_parser_feed(&parser, fragment[i], i, &m));
-    assert(!serial_parser_expire(&parser, 999, &m));
-    assert(serial_parser_expire(&parser, 1000, &m) && m.error == PROTOCOL_TIMEOUT);
-    assert(!serial_parser_expire(&parser, 5000, &m));
-    assert(!serial_parser_feed(&parser, '\n', 5001, &m));
+    assert(!serial_parser_expire(&parser, SERIAL_FRAME_TIMEOUT_MS - 1, &m));
+    assert(serial_parser_expire(&parser, SERIAL_FRAME_TIMEOUT_MS, &m) && m.error == PROTOCOL_TIMEOUT);
+    assert(!serial_parser_expire(&parser, 10 * SERIAL_FRAME_TIMEOUT_MS, &m));
+    assert(!serial_parser_feed(&parser, '\n', 10 * SERIAL_FRAME_TIMEOUT_MS + 1, &m));
     for (size_t i = 0; fragment[i]; ++i)
-        assert(!serial_parser_feed(&parser, fragment[i], 5002 + i, &m));
-    assert(serial_parser_feed(&parser, '\n', 5016, &m));
+        assert(!serial_parser_feed(&parser, fragment[i], 10 * SERIAL_FRAME_TIMEOUT_MS + 2 + i, &m));
+    assert(serial_parser_feed(&parser, '\n', 10 * SERIAL_FRAME_TIMEOUT_MS + 16, &m));
     assert(m.error == PROTOCOL_OK && m.command == COMMAND_ESTOP);
 
     serial_parser_init(&parser);
@@ -99,5 +116,16 @@ int main(void) {
         assert(command_control_execute(&state, (serial_command_t)99) == COMMAND_INVALID);
         assert(state == ROBOT_ERROR);
     }
+    /* Servo dispatch: refused after an emergency and when the backend is disabled. */
+    bench_servo_t servos = {0};
+    bench_servo_config_t servo_config = {.min_us = 600, .max_us = 2400, .max_dps = 90,
+                                         .start_pin = 15, .led_pin = 48, .estop_pin = -1, .base_pin = 4};
+    assert(bench_servo_init(&servos, NULL, &servo_config));
+    robot_state_t idle = ROBOT_IDLE, error = ROBOT_ERROR;
+    assert(command_control_servo(NULL, &servos, 5, 90) == COMMAND_INVALID);
+    assert(command_control_servo(&idle, NULL, 5, 90) == COMMAND_SERVO_DISABLED);
+    assert(command_control_servo(&idle, &servos, 5, 90) == COMMAND_SERVO_DISABLED);
+    assert(command_control_servo(&error, &servos, 5, 90) == COMMAND_EMERGENCY_LATCHED);
+    assert(command_control_execute(&idle, COMMAND_SERVO) == COMMAND_INVALID && idle == ROBOT_IDLE);
     puts("PASS: serial grammar, bounds, fragmentation, timeout, recovery, arbitrary bytes, command safety");
 }

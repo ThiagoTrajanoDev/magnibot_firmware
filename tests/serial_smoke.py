@@ -71,10 +71,10 @@ def main():
                 continue
             frames.append(frame)
 
-    def response(request, expected, ident, state=None):
+    def response(request, expected, ident, state=None, wait=3):
         start = len(frames)
         port.write(request)
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             collect(0.15)
             candidates = [f for f in frames[start:] if f.get('type') == 'response'
@@ -113,12 +113,13 @@ def main():
         response(b'MB1 9 status extra\n', 'bad_frame', 9)
         response(b'\x00\n', 'bad_frame', None)
         response(b'x' * 120 + b'\n', 'too_long', None)
-        response(b'MB1 10 status', 'timeout', None)
+        response(b'MB1 10 status', 'timeout', None, wait=8)  # frame timeout is 5 s
         response(b'\nMB1 11 status\n', 'ok', 11, 'IDLE')
         response(b'MB1 12 estop\n', 'ok', 12, 'ERROR')
         response(b'MB1 13 estop\n', 'ok', 13, 'ERROR')
         for ident, command in enumerate(('start', 'confirm', 'rescan'), 14):
             response(f'MB1 {ident} {command}\n'.encode(), 'emergency_latched', ident, 'ERROR')
+        response(b'5 45\n', 'emergency_latched', None, 'ERROR')  # bare servo command after estop
         # Burst overload must not reset ERROR or compromise subsequent recovery.
         port.write(b'\n' * 80 + b'MB1 17 estop\n')
         collect(2)

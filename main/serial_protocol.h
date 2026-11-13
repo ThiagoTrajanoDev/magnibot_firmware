@@ -5,11 +5,13 @@
 #include <stdint.h>
 
 #define SERIAL_LINE_MAX 96
-#define SERIAL_FRAME_TIMEOUT_MS 1000
+/* Long enough for a person typing a line in a serial terminal. */
+#define SERIAL_FRAME_TIMEOUT_MS 5000
 
 typedef enum {
     COMMAND_STATUS, COMMAND_DIAGNOSTIC, COMMAND_START,
-    COMMAND_CONFIRM, COMMAND_RESCAN, COMMAND_ESTOP
+    COMMAND_CONFIRM, COMMAND_RESCAN, COMMAND_ESTOP,
+    COMMAND_SERVO  /* bare "<gpio> <degrees>" line, no MB1 frame */
 } serial_command_t;
 typedef enum {
     PROTOCOL_OK, PROTOCOL_BAD_FRAME, PROTOCOL_BAD_VERSION, PROTOCOL_BAD_ID,
@@ -20,6 +22,7 @@ typedef struct {
     bool id_valid;
     serial_command_t command;
     protocol_error_t error;
+    int servo_gpio, servo_degrees;  /* valid for COMMAND_SERVO */
 } protocol_message_t;
 typedef struct {
     char line[SERIAL_LINE_MAX + 1];
