@@ -47,7 +47,8 @@ def main():
     options = args.parse_args()
     output = Path(options.output_dir).resolve()
     firmware = Path(__file__).resolve().parents[1]
-    if output == firmware or firmware in output.parents:
+    repository = firmware.parent
+    if output == repository or repository in output.parents:
         raise SystemExit('Store test evidence outside the firmware repository.')
     output.mkdir(parents=True, exist_ok=True)
     build = provenance(firmware, (firmware / options.build_dir).resolve())
