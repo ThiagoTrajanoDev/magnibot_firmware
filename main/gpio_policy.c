@@ -12,3 +12,7 @@ bool gpio_policy_estop_allowed(int pin, int start_pin, int led_pin) {
     if (pin < 0 || pin > 48 || pin == start_pin || pin == led_pin) return false;
     return !(reserved & PIN(pin));
 }
+
+bool gpio_policy_servo_allowed(int pin, int start_pin, int led_pin, int estop_pin, int base_pin) {
+    return pin != estop_pin && pin != base_pin && gpio_policy_estop_allowed(pin, start_pin, led_pin);
+}

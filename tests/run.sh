@@ -43,3 +43,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     main/actuator_interface.c main/motion_model.c main/sensor_data.c \
     -lm -o "$test_dir/test_interfaces"
 "$test_dir/test_interfaces"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
+    -Imain tests/test_bench_servo.c main/bench_servo.c main/gpio_policy.c \
+    -o "$test_dir/test_bench_servo"
+"$test_dir/test_bench_servo"

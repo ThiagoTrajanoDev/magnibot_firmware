@@ -15,5 +15,13 @@ int main(void) {
     for (unsigned i = 0; i < sizeof(reserved) / sizeof(reserved[0]); ++i)
         assert(!gpio_policy_estop_allowed(reserved[i], start, led));
     assert(!gpio_policy_estop_allowed(17, 17, led) && !gpio_policy_estop_allowed(17, start, 17));
+    /* Servo pins: same rules, plus never the emergency pin or the continuous-rotation base pin. */
+    for (unsigned i = 0; i < sizeof(usable) / sizeof(usable[0]); ++i) {
+        bool special = usable[i] == 17 || usable[i] == 4;
+        assert(gpio_policy_servo_allowed(usable[i], start, led, 17, 4) == !special);
+    }
+    for (unsigned i = 0; i < sizeof(reserved) / sizeof(reserved[0]); ++i)
+        assert(!gpio_policy_servo_allowed(reserved[i], start, led, 17, 4));
+    assert(gpio_policy_servo_allowed(17, start, led, -1, -1) && gpio_policy_servo_allowed(4, start, led, -1, -1));
     puts("PASS: emergency GPIO policy rejects reserved, absent, strapping and conflicting pins");
 }
