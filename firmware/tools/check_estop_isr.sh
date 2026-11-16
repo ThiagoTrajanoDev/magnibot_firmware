@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds the variant with the emergency ISR compiled in (the GPIO below is only a
-# compile target, not an approved wiring) and checks that the handler lives in IRAM.
+# Builds the variant with the emergency ISR compiled in (CONFIG_MAGNIBOT_ESTOP_GPIO from
+# sdkconfig.defaults, isolated build dir) and checks that the handler lives in IRAM.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if command -v idf.py >/dev/null; then
@@ -13,8 +13,7 @@ else
 fi
 dir=build/estop-check
 mkdir -p "$dir"
-sed 's/^CONFIG_MAGNIBOT_ESTOP_GPIO=.*/CONFIG_MAGNIBOT_ESTOP_GPIO=17/' sdkconfig.defaults > "$dir/sdkconfig.defaults"
-"${idf[@]}" -B "$dir" -D SDKCONFIG="$dir/sdkconfig" -D SDKCONFIG_DEFAULTS="$dir/sdkconfig.defaults" build
+"${idf[@]}" -B "$dir" -D SDKCONFIG="$dir/sdkconfig" -D SDKCONFIG_DEFAULTS="sdkconfig.defaults" build
 address=$(xtensa-esp32s3-elf-nm "$dir/magnibot_firmware.elf" | awk '$3 == "emergency_isr" {print $1}')
 [ -n "$address" ] || { echo 'emergency_isr ausente no ELF.' >&2; exit 1; }
 # ESP32-S3 internal instruction RAM window.

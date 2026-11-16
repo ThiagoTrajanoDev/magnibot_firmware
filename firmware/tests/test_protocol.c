@@ -119,7 +119,7 @@ int main(void) {
     /* Servo dispatch: refused after an emergency and when the backend is disabled. */
     bench_servo_t servos = {0};
     bench_servo_config_t servo_config = {.min_us = 600, .max_us = 2400, .max_dps = 90,
-                                         .start_pin = 15, .led_pin = 48, .estop_pin = -1, .base_pin = 4};
+                                         .start_pin = 4, .led_pin = 48, .estop_pin = 6, .base_pin = 15};
     assert(bench_servo_init(&servos, NULL, &servo_config));
     robot_state_t idle = ROBOT_IDLE, error = ROBOT_ERROR;
     assert(command_control_servo(NULL, &servos, 5, 90) == COMMAND_INVALID);

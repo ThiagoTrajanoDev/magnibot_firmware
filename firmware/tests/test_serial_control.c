@@ -47,7 +47,7 @@ int main(void) {
     assert(robot_runtime_init());
     serial_control_poll(NULL);
     bench_servo_config_t servo_config = {.min_us = 600, .max_us = 2400, .max_dps = 90,
-        .start_pin = 15, .led_pin = 48, .estop_pin = -1, .base_pin = 4};
+        .start_pin = 4, .led_pin = 48, .estop_pin = 6, .base_pin = 15};
     bench_servo_driver_t servo_driver = {.attach = servo_attach, .write_us = servo_write, .shutdown = servo_shutdown};
     assert(bench_servo_init(&servos, &servo_driver, &servo_config));
     assert(serial_control_init(&servos) == ESP_ERR_INVALID_ARG);
@@ -62,9 +62,9 @@ int main(void) {
     feed("tus\n");
     feed("MB1 2 start\n");
     assert(state == ROBOT_IDLE);
-    feed("5 90\n");
+    feed("16 90\n");
     assert(servo_attaches == 1 && servo_pulse == 1500);
-    feed("99 10\n5 181\n");
+    feed("99 10\n16 181\n");
     feed("MB1 3 incomplete");
     now += SERIAL_FRAME_TIMEOUT_MS;
     serial_control_poll(&state);
@@ -73,7 +73,7 @@ int main(void) {
     feed("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
     feed("\nMB1 4 estop\nMB1 5 start\n");
     assert(state == ROBOT_ERROR);
-    feed("5 45\n");
+    feed("16 45\n");
     for (int i = 0; i < 20; ++i) { serial_control_poll(&state); serial_control_flush(); }
     feed("MB1 6 diagnostic\nMB1 7 estop\nMB1 8 start\n");
     for (int i = 0; i < 4; ++i) { serial_control_poll(&state); serial_control_flush(); }
@@ -93,7 +93,7 @@ int main(void) {
     const char *dropped = strstr(output, "\"dropped_responses\":");
     assert(dropped && strtoul(dropped + strlen("\"dropped_responses\":"), NULL, 10) > 0);
     assert(strstr(output, "\"id\":null,\"ok\":true,\"code\":\"ok\""));
-    assert(strstr(output, "\"servo\":{\"gpio\":5,\"target_deg\":90}"));
+    assert(strstr(output, "\"servo\":{\"gpio\":16,\"target_deg\":90}"));
     assert(strstr(output, "\"code\":\"gpio_not_allowed\""));
     assert(strstr(output, "\"code\":\"angle_out_of_range\""));
     assert(strstr(output, "\"bench_servo\":{\"enabled\":true,\"channels\":1}"));

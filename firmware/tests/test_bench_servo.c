@@ -37,7 +37,7 @@ static hardware_result_t shutdown(void *c) {
 
 static const bench_servo_config_t config = {
     .min_us = 600, .max_us = 2400, .max_dps = 90,
-    .start_pin = 15, .led_pin = 48, .estop_pin = 17, .base_pin = 4
+    .start_pin = 4, .led_pin = 48, .estop_pin = 6, .base_pin = 15
 };
 
 static void make(bench_servo_t *s, mock_t *m) {
@@ -74,21 +74,21 @@ int main(void) {
     /* Range and pin policy are checked before the backend is touched. */
     make(&s, &m);
     assert(bench_servo_enabled(&s));
-    assert(bench_servo_set(&s, 5, -1) == BENCH_SERVO_BAD_ANGLE);
-    assert(bench_servo_set(&s, 5, 181) == BENCH_SERVO_BAD_ANGLE);
-    const int refused[] = {-1, 0, 3, 4, 15, 17, 19, 20, 26, 30, 37, 43, 45, 46, 48, 49, 99};
+    assert(bench_servo_set(&s, 16, -1) == BENCH_SERVO_BAD_ANGLE);
+    assert(bench_servo_set(&s, 16, 181) == BENCH_SERVO_BAD_ANGLE);
+    const int refused[] = {-1, 0, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 19, 20, 26, 30, 37, 43, 45, 46, 48, 49, 99};
     for (unsigned i = 0; i < sizeof(refused) / sizeof(refused[0]); ++i)
         assert(bench_servo_set(&s, refused[i], 90) == BENCH_SERVO_BAD_GPIO);
     assert(m.attaches == 0 && m.writes == 0 && bench_servo_channels(&s) == 0);
 
     /* First command jumps to the target: 0, 90 and 180 degrees map onto the pulse range. */
-    assert(bench_servo_set(&s, 5, 0) == BENCH_SERVO_OK && m.pulse[0] == 600 && m.pins[0] == 5);
-    assert(bench_servo_set(&s, 6, 90) == BENCH_SERVO_OK && m.pulse[1] == 1500);
-    assert(bench_servo_set(&s, 7, 180) == BENCH_SERVO_OK && m.pulse[2] == 2400);
+    assert(bench_servo_set(&s, 16, 0) == BENCH_SERVO_OK && m.pulse[0] == 600 && m.pins[0] == 16);
+    assert(bench_servo_set(&s, 17, 90) == BENCH_SERVO_OK && m.pulse[1] == 1500);
+    assert(bench_servo_set(&s, 18, 180) == BENCH_SERVO_OK && m.pulse[2] == 2400);
     assert(bench_servo_channels(&s) == 3 && m.writes == 3);
 
     /* Later commands on a known pin are slew limited and non-blocking. */
-    assert(bench_servo_set(&s, 5, 180) == BENCH_SERVO_OK);
+    assert(bench_servo_set(&s, 16, 180) == BENCH_SERVO_OK);
     assert(bench_servo_channels(&s) == 3 && m.writes == 3 && m.pulse[0] == 600);
     bench_servo_poll(&s, 0);
     for (int t = 10; t <= 1000; t += 10) bench_servo_poll(&s, t);
@@ -99,7 +99,7 @@ int main(void) {
     unsigned writes = m.writes;
     bench_servo_poll(&s, 2110);
     assert(m.writes == writes);                              /* idle servo is not rewritten */
-    assert(bench_servo_set(&s, 5, 0) == BENCH_SERVO_OK);
+    assert(bench_servo_set(&s, 16, 0) == BENCH_SERVO_OK);
     bench_servo_poll(&s, 2110);                              /* no time elapsed: no motion */
     bench_servo_poll(&s, 2105);                              /* clock going backwards: no motion */
     assert(m.pulse[0] == 2400 && !bench_servo_faulted(&s));
@@ -107,10 +107,10 @@ int main(void) {
     assert(m.pulse[0] == 600);
 
     /* Channel table is bounded; reusing a pin does not consume a channel. */
-    assert(bench_servo_set(&s, 10, 45) == BENCH_SERVO_OK && bench_servo_set(&s, 11, 45) == BENCH_SERVO_OK);
+    assert(bench_servo_set(&s, 8, 45) == BENCH_SERVO_OK && bench_servo_set(&s, 9, 45) == BENCH_SERVO_OK);
     assert(bench_servo_channels(&s) == BENCH_SERVO_MAX_CHANNELS);
-    assert(bench_servo_set(&s, 12, 45) == BENCH_SERVO_NO_CHANNEL);
-    assert(bench_servo_set(&s, 11, 90) == BENCH_SERVO_OK);
+    assert(bench_servo_set(&s, 21, 45) == BENCH_SERVO_NO_CHANNEL);
+    assert(bench_servo_set(&s, 9, 90) == BENCH_SERVO_OK);
     assert(bench_servo_channels(&s) == BENCH_SERVO_MAX_CHANNELS);
 
     /* Stop latches, refuses commands and repeats shutdown until the backend confirms. */
@@ -118,7 +118,7 @@ int main(void) {
     bench_servo_stop(&s);
     bench_servo_stop(&s);
     assert(s.latched && !s.shutdown_confirmed && m.shutdowns == 2);
-    assert(bench_servo_set(&s, 5, 10) == BENCH_SERVO_STOPPED);
+    assert(bench_servo_set(&s, 16, 10) == BENCH_SERVO_STOPPED);
     unsigned moved = m.writes;
     bench_servo_poll(&s, 9000);
     assert(m.writes == moved);
@@ -130,15 +130,15 @@ int main(void) {
     /* Backend failures latch and raise the fault flag (attach, first write, slew write). */
     make(&s, &m);
     m.attach_result = IO_FAULT;
-    assert(bench_servo_set(&s, 5, 90) == BENCH_SERVO_FAULT);
+    assert(bench_servo_set(&s, 16, 90) == BENCH_SERVO_FAULT);
     assert(bench_servo_faulted(&s) && s.latched && m.shutdowns == 1 && bench_servo_channels(&s) == 0);
-    assert(bench_servo_set(&s, 5, 90) == BENCH_SERVO_STOPPED);
+    assert(bench_servo_set(&s, 16, 90) == BENCH_SERVO_STOPPED);
     make(&s, &m);
     m.write_result = IO_FAULT;
-    assert(bench_servo_set(&s, 5, 90) == BENCH_SERVO_FAULT);
+    assert(bench_servo_set(&s, 16, 90) == BENCH_SERVO_FAULT);
     assert(bench_servo_faulted(&s) && s.latched && m.shutdowns == 1);
     make(&s, &m);
-    assert(bench_servo_set(&s, 5, 0) == BENCH_SERVO_OK && bench_servo_set(&s, 5, 180) == BENCH_SERVO_OK);
+    assert(bench_servo_set(&s, 16, 0) == BENCH_SERVO_OK && bench_servo_set(&s, 16, 180) == BENCH_SERVO_OK);
     m.write_result = IO_FAULT;
     bench_servo_poll(&s, 0);
     bench_servo_poll(&s, 100);
