@@ -47,3 +47,6 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Imain tests/test_bench_servo.c main/bench_servo.c main/gpio_policy.c \
     -o "$test_dir/test_bench_servo"
 "$test_dir/test_bench_servo"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
+    tests/test_base_motion.c main/base_motion.c -lm -o "$test_dir/test_base_motion"
+"$test_dir/test_base_motion"
