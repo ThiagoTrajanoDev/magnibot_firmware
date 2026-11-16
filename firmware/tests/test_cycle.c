@@ -1,3 +1,5 @@
+#include "command_control.h"
+#include "button_control.h"
 #ifdef NDEBUG
 #error "tests rely on assert() side effects; do not build with NDEBUG"
 #endif
@@ -44,14 +46,75 @@ static void reach(cycle_phase_t wanted) {
     }
     assert(cycle.phase==wanted);
 }
+esp_err_t gpio_config(const gpio_config_t *config) {
+    assert(config->pin_bit_mask == (1ULL << 4));
+    assert(config->mode == GPIO_MODE_INPUT && config->pull_up_en == GPIO_PULLUP_ENABLE);
+    return ESP_OK;
+}
+
+int gpio_get_level(gpio_num_t pin) {
+    assert(pin == 4);
+    return 1;
+}
+
+int64_t esp_timer_get_time(void) {
+    return now * 1000;
+}
+
+static void test_start_button(void) {
+    setup();
+    button_control_t button;
+    robot_event_t event;
+    assert(button_control_init(&button, 4) == ESP_OK);
+    assert(!button_control_sample(&button, 0, 10, &event));
+    assert(!button_control_sample(&button, 0, 60, &event));
+    assert(!button_control_sample(&button, 1, 100, &event));
+    assert(!button_control_sample(&button, 1, 150, &event));
+    now = 1150;
+    refresh();
+    assert(button_control_sample(&button, 1, now, &event));
+    assert(event == EVENT_SINGLE_CLICK);
+    assert(cycle_handle_event(&cycle, &plan, event, now));
+    reach(CYCLE_WAIT_CONFIRM);
+}
+
+static command_result_t serial_event(const char *line) {
+    serial_parser_t parser;
+    serial_parser_init(&parser);
+    protocol_message_t message;
+    for (; *line; ++line) {
+        if (serial_parser_feed(&parser, (uint8_t)*line, now, &message)) {
+            assert(message.error == PROTOCOL_OK);
+            return command_control_cycle(&cycle, &plan, message.command, now);
+        }
+    }
+    return COMMAND_INVALID;
+}
+
 int main(void) {
-    setup(); assert(cycle_start_scan(&cycle,&plan,now));
+    test_start_button();
+    setup();
+    assert(serial_event("MB1 1 confirm\n") == COMMAND_MOTION_BLOCKED);
+    assert(serial_event("MB1 2 start\n") == COMMAND_ACCEPTED);
+    reach(CYCLE_WAIT_CONFIRM);
+    assert(serial_event("MB1 3 rescan\n") == COMMAND_ACCEPTED);
+    reach(CYCLE_WAIT_CONFIRM);
+    assert(serial_event("MB1 4 confirm\n") == COMMAND_ACCEPTED);
+    assert(serial_event("MB1 5 estop\n") == COMMAND_ACCEPTED);
+    assert(serial_event("MB1 6 start\n") == COMMAND_EMERGENCY_LATCHED);
+
+    setup();
+    assert(!cycle_handle_event(&cycle,&plan,EVENT_DOUBLE_CLICK,now));
+    assert(!cycle_handle_event(&cycle,&plan,EVENT_LONG_PRESS,now));
+    assert(cycle_handle_event(&cycle,&plan,EVENT_SINGLE_CLICK,now));
+    assert(!cycle_handle_event(&cycle,&plan,EVENT_DOUBLE_CLICK,now));
     assert(cycle_robot_state(&cycle)==ROBOT_RUN_VARREDURA);
     reach(CYCLE_WAIT_CONFIRM);
     assert(cycle_robot_state(&cycle)==ROBOT_VARREDURA_CONCLUIDA);
     assert(cycle.map_valid && cycle.selected_index==1 && cycle.selected_distance_mm==200);
     assert(model.reference[0]==0);
-    assert(cycle_confirm(&cycle,now));
+    assert(!cycle_handle_event(&cycle,&plan,EVENT_SINGLE_CLICK,now));
+    assert(cycle_handle_event(&cycle,&plan,EVENT_DOUBLE_CLICK,now));
     assert(cycle_robot_state(&cycle)==ROBOT_RUN_DESLOCAMENTO);
     reach(CYCLE_DEPOSIT);
     float grip=model.reference[CYCLE_GRIPPER_AXIS];
@@ -67,7 +130,7 @@ int main(void) {
         setup();
         if(phase!=CYCLE_IDLE) { assert(cycle_start_scan(&cycle,&plan,now));reach((cycle_phase_t)phase); }
         float held[MOTION_AXES];memcpy(held,model.reference,sizeof(held));
-        cycle_abort(&cycle,CYCLE_EMERGENCY);
+        assert(cycle_handle_event(&cycle,&plan,EVENT_EMERGENCY,now));
         tick();
         assert(cycle.phase==CYCLE_ERROR && cycle.fault==CYCLE_EMERGENCY && !cycle.map_valid);
         assert(!cycle_start_scan(&cycle,&plan,now));assert(!cycle_confirm(&cycle,now));
@@ -92,7 +155,7 @@ int main(void) {
     setup();assert(cycle_start_scan(&cycle,&plan,now));reach(CYCLE_WAIT_CONFIRM);
     now+=plan.map_ttl_ms+1;refresh();assert(!cycle_confirm(&cycle,now));assert(cycle.fault==CYCLE_MAP_EXPIRED);
     setup();assert(cycle_start_scan(&cycle,&plan,now));reach(CYCLE_WAIT_CONFIRM);
-    assert(cycle_start_scan(&cycle,&plan,now));assert(!cycle.map_valid && cycle.scan_index==0);
+    assert(cycle_handle_event(&cycle,&plan,EVENT_LONG_PRESS,now));assert(!cycle.map_valid && cycle.scan_index==0);
     setup();plan.map_ttl_ms=10;assert(cycle_start_scan(&cycle,&plan,now));reach(CYCLE_ERROR);
     assert(cycle.fault==CYCLE_MAP_EXPIRED);
     setup();plan.scan[1][1]=NAN;assert(!cycle_start_scan(&cycle,&plan,now));assert(cycle.fault==CYCLE_BAD_PLAN);

@@ -41,6 +41,8 @@ typedef struct {
 void cycle_sequence_init(cycle_sequence_t *cycle, motion_model_t *motion, sensor_data_t *sensors);
 bool cycle_start_scan(cycle_sequence_t *cycle, const cycle_plan_t *plan, int64_t now_ms);
 bool cycle_confirm(cycle_sequence_t *cycle, int64_t now_ms);
+bool cycle_handle_event(cycle_sequence_t *cycle, const cycle_plan_t *plan,
+                        robot_event_t event, int64_t now_ms);
 void cycle_tick(cycle_sequence_t *cycle, int64_t now_ms);
 void cycle_abort(cycle_sequence_t *cycle, cycle_fault_t reason);
 robot_state_t cycle_robot_state(const cycle_sequence_t *cycle);

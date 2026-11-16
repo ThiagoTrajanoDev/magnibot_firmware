@@ -18,6 +18,22 @@ command_result_t command_control_execute(robot_state_t *state, serial_command_t 
             return COMMAND_INVALID;
     }
 }
+command_result_t command_control_cycle(cycle_sequence_t *cycle, const cycle_plan_t *plan,
+                                       serial_command_t command, int64_t now_ms) {
+    robot_event_t event;
+    switch (command) {
+        case COMMAND_START: event = EVENT_SINGLE_CLICK; break;
+        case COMMAND_CONFIRM: event = EVENT_DOUBLE_CLICK; break;
+        case COMMAND_RESCAN: event = EVENT_LONG_PRESS; break;
+        case COMMAND_ESTOP: event = EVENT_EMERGENCY; break;
+        default: return COMMAND_INVALID;
+    }
+    if (!cycle || (command != COMMAND_ESTOP && !plan)) return COMMAND_MOTION_BLOCKED;
+    if (cycle->phase == CYCLE_ERROR)
+        return command == COMMAND_ESTOP ? COMMAND_ACCEPTED : COMMAND_EMERGENCY_LATCHED;
+    return cycle_handle_event(cycle, plan, event, now_ms) ? COMMAND_ACCEPTED : COMMAND_MOTION_BLOCKED;
+}
+
 command_result_t command_control_servo(robot_state_t *state, bench_servo_t *servos,
                                        int gpio, int degrees) {
     if (!state) return COMMAND_INVALID;

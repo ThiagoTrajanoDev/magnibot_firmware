@@ -107,6 +107,24 @@ bool cycle_confirm(cycle_sequence_t *cycle, int64_t now_ms) {
     return move_to(cycle, CYCLE_PICKUP, cycle->plan.pickup[cycle->selected_index], now_ms, false);
 }
 
+bool cycle_handle_event(cycle_sequence_t *cycle, const cycle_plan_t *plan,
+                        robot_event_t event, int64_t now_ms) {
+    if (!cycle || cycle->phase == CYCLE_ERROR) return false;
+    switch (event) {
+        case EVENT_SINGLE_CLICK:
+            return cycle->phase == CYCLE_IDLE && cycle_start_scan(cycle, plan, now_ms);
+        case EVENT_DOUBLE_CLICK:
+            return cycle_confirm(cycle, now_ms);
+        case EVENT_LONG_PRESS:
+            return cycle->phase == CYCLE_WAIT_CONFIRM && cycle_start_scan(cycle, plan, now_ms);
+        case EVENT_EMERGENCY:
+            cycle_abort(cycle, CYCLE_EMERGENCY);
+            return true;
+        default:
+            return false;
+    }
+}
+
 void cycle_tick(cycle_sequence_t *cycle, int64_t now_ms) {
     if (!cycle || cycle->phase == CYCLE_IDLE || cycle->phase == CYCLE_ERROR) return;
     if (now_ms < cycle->last_ms) { cycle_abort(cycle, CYCLE_CLOCK); return; }
