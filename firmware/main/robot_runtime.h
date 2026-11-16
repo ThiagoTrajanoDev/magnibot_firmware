@@ -3,6 +3,7 @@
 #include "cycle_sequence.h"
 #include <stdbool.h>
 #include "hardware_io.h"
+#include "sensor_interface.h"
 /* Fixed bench-mode fields shared by every JSON frame. motion_enabled covers the cycle/actuator
  * backend only; bench servos (opt-in, Kconfig) are reported separately as "bench_servo". */
 #define ROBOT_MODE_JSON "\"mode\":\"bench\",\"motion_enabled\":false"
@@ -18,6 +19,8 @@ typedef struct {
 } robot_runtime_status_t;
 /* One boot-time init: a failed or repeated call is final (never retried or reset). */
 bool robot_runtime_init(void);
+bool robot_runtime_init_with_distance(const sensor_driver_t *driver);
+bool robot_runtime_distance(int64_t now_ms, float *mm);
 void robot_runtime_poll(robot_state_t *state, int64_t now_ms);
 robot_runtime_status_t robot_runtime_status(int64_t now_ms);
 #endif

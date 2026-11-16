@@ -11,13 +11,17 @@ static actuator_interface_t output;
 static bool attempted, initialized;
 
 bool robot_runtime_init(void) {
+    return robot_runtime_init_with_distance(NULL);
+}
+
+bool robot_runtime_init_with_distance(const sensor_driver_t *driver) {
     if (attempted) return false;
     attempted = true;
     axis_limits_t limits[MOTION_AXES];
     motion_default_limits(limits);
     sensor_data_init(&sensors);
     bool motion_ok = motion_model_init(&motion, limits);
-    bool sensors_ok = sensor_interface_init(&acquisition, &sensors, NULL, NULL, 50, 200, 500);
+    bool sensors_ok = sensor_interface_init(&acquisition, &sensors, driver, NULL, 50, 200, 500);
     bool actuators_ok = actuator_interface_init(&output, NULL, limits);
     initialized = motion_ok && sensors_ok && actuators_ok;
     cycle_sequence_init(&cycle, &motion, &sensors);
@@ -60,4 +64,13 @@ robot_runtime_status_t robot_runtime_status(int64_t now_ms) {
     result.distance_status = sensor_sample_check(&sensors.distance_mm, now_ms, 500, SENSOR_HARDWARE);
     result.current_status = sensor_sample_check(&sensors.current_ma, now_ms, 500, SENSOR_HARDWARE);
     return result;
+}
+
+
+bool robot_runtime_distance(int64_t now_ms, float *mm) {
+    if (!initialized || !mm ||
+        sensor_sample_check(&sensors.distance_mm, now_ms, 500, SENSOR_HARDWARE) != SENSOR_FRESH)
+        return false;
+    *mm = sensors.distance_mm.value;
+    return true;
 }

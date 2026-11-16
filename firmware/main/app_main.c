@@ -11,6 +11,7 @@
 #include "bench_control.h"
 #include "serial_control.h"
 #include "robot_runtime.h"
+#include "tof_vl53l0x.h"
 #include "gpio_policy.h"
 #include "bench_servo.h"
 #include "servo_pwm.h"
@@ -71,7 +72,15 @@ static esp_err_t servo_init(void) {
 
 void app_main(void) {
     robot_state_t state = ROBOT_IDLE;
-    bool runtime_ok = robot_runtime_init();
+    bool runtime_ok;
+#if CONFIG_MAGNIBOT_TOF
+    sensor_driver_t distance_driver;
+    esp_err_t tof_err = tof_vl53l0x_init(&distance_driver);
+    runtime_ok = robot_runtime_init_with_distance(tof_err == ESP_OK ? &distance_driver : NULL);
+    if (tof_err != ESP_OK) ESP_LOGE(TAG, "VL53L0X: %s", esp_err_to_name(tof_err));
+#else
+    runtime_ok = robot_runtime_init();
+#endif
     button_control_t start = {0};
     bool button_ok = button_control_init(&start, BTN_START_GPIO) == ESP_OK;
     esp_err_t led_err = led_control_init();
@@ -85,7 +94,7 @@ void app_main(void) {
                  runtime_ok, button_ok, esp_err_to_name(led_err), esp_err_to_name(emergency_err),
                  esp_err_to_name(servo_err), esp_err_to_name(serial_err));
     }
-    ESP_LOGW(TAG, "BANCADA: ciclo bloqueado; sensores ausentes; estop_gpio=%d; servo_bancada=%d",
+    ESP_LOGW(TAG, "BANCADA: ciclo bloqueado; estop_gpio=%d; servo_bancada=%d",
              CONFIG_MAGNIBOT_ESTOP_GPIO, bench_servo_enabled(&servos));
     robot_state_t led_state = state;
     led_control_update(led_state);
@@ -113,15 +122,19 @@ void app_main(void) {
         serial_control_flush();
         if (now >= next_telemetry) {
             robot_runtime_status_t runtime = robot_runtime_status(now);
+            char distance[24] = "null";
+            float mm;
+            if (robot_runtime_distance(now, &mm))
+                snprintf(distance, sizeof(distance), "%.0f", (double)mm);
             printf("{\"type\":\"telemetry\",\"version\":1,\"uptime_ms\":%" PRId64
                    ",\"state\":\"%s\",\"state_code\":%d," ROBOT_MODE_JSON ","
-                   "\"estop_configured\":%s,\"angles_deg\":null,\"distance_mm\":null,"
+                   "\"estop_configured\":%s,\"angles_deg\":null,\"distance_mm\":%s,"
                    "\"current_ma\":null,\"gripper_percent\":null,\"execution\":{\"backend\":\"%s\","
                    "\"axes_configured\":%u,\"phase\":\"%s\",\"fault\":\"%s\"},"
                    "\"bench_servo\":{\"enabled\":%s,\"channels\":%u},\"stack_min_free_bytes\":%u}\n",
                    now, state_machine_get_name(state), state,
                    CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
-                   runtime.backend, runtime.axes_configured, cycle_phase_name(runtime.phase),
+                   distance, runtime.backend, runtime.axes_configured, cycle_phase_name(runtime.phase),
                    cycle_fault_name(runtime.fault), bench_servo_enabled(&servos) ? "true" : "false",
                    bench_servo_channels(&servos), (unsigned)uxTaskGetStackHighWaterMark(NULL));
             next_telemetry = now + 500;

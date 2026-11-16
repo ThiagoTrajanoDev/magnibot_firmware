@@ -50,3 +50,6 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
     tests/test_base_motion.c main/base_motion.c -lm -o "$test_dir/test_base_motion"
 "$test_dir/test_base_motion"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
+    tests/test_tof_acquisition.c main/tof_acquisition.c -o "$test_dir/test_tof"
+"$test_dir/test_tof"

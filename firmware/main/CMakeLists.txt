@@ -9,6 +9,9 @@ idf_component_register(
         "robot_runtime.c"
         "hardware_io.c"
         "sensor_interface.c"
+        "tof_acquisition.c"
+        "tof_i2c.c"
+        "tof_vl53l0x.c"
         "actuator_interface.c"
         "serial_protocol.c"
         "command_control.c"
@@ -23,6 +26,8 @@ idf_component_register(
     REQUIRES
         led_strip
         esp_driver_gpio
+        esp_driver_i2c
+        vl53l0x
         esp_driver_ledc
         esp_timer
         esp_driver_usb_serial_jtag
