@@ -21,7 +21,6 @@ typedef struct {
 } bench_servo_driver_t;
 
 typedef struct {
-    uint16_t min_us, max_us;  /* pulse width at 0 and at 180 degrees */
     uint16_t max_dps;         /* slew limit, degrees per second */
     int start_pin, led_pin, estop_pin, base_pin;  /* pins a servo may never use */
 } bench_servo_config_t;

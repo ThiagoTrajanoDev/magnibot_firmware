@@ -54,15 +54,13 @@ static esp_err_t emergency_init(void) {
 /* Servo commands stay refused unless CONFIG_MAGNIBOT_BENCH_SERVO is enabled. */
 static esp_err_t servo_init(void) {
     bench_servo_config_t config = {
-        .min_us = 600, .max_us = 2400, .max_dps = 90,
+        .max_dps = 90,
         .start_pin = BTN_START_GPIO, .led_pin = WS2812_GPIO,
         .estop_pin = CONFIG_MAGNIBOT_ESTOP_GPIO, .base_pin = SERVO_BASE_GPIO
     };
     const bench_servo_driver_t *backend = NULL;
 #if CONFIG_MAGNIBOT_BENCH_SERVO
     static bench_servo_driver_t driver;
-    config.min_us = CONFIG_MAGNIBOT_SERVO_MIN_US;
-    config.max_us = CONFIG_MAGNIBOT_SERVO_MAX_US;
     config.max_dps = CONFIG_MAGNIBOT_SERVO_MAX_DPS;
     esp_err_t err = servo_pwm_init(&driver);
     if (err != ESP_OK) return err;

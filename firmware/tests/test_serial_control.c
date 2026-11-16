@@ -46,7 +46,7 @@ static void feed(const char *text) {
 int main(void) {
     assert(robot_runtime_init());
     serial_control_poll(NULL);
-    bench_servo_config_t servo_config = {.min_us = 600, .max_us = 2400, .max_dps = 90,
+    bench_servo_config_t servo_config = {.max_dps = 90,
         .start_pin = 4, .led_pin = 48, .estop_pin = 6, .base_pin = 15};
     bench_servo_driver_t servo_driver = {.attach = servo_attach, .write_us = servo_write, .shutdown = servo_shutdown};
     assert(bench_servo_init(&servos, &servo_driver, &servo_config));
@@ -63,7 +63,7 @@ int main(void) {
     feed("MB1 2 start\n");
     assert(state == ROBOT_IDLE);
     feed("16 90\n");
-    assert(servo_attaches == 1 && servo_pulse == 1500);
+    assert(servo_attaches == 1 && servo_pulse == 1916);
     feed("99 10\n16 181\n");
     feed("MB1 3 incomplete");
     now += SERIAL_FRAME_TIMEOUT_MS;

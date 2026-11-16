@@ -36,7 +36,7 @@ static hardware_result_t shutdown(void *c) {
 }
 
 static const bench_servo_config_t config = {
-    .min_us = 600, .max_us = 2400, .max_dps = 90,
+    .max_dps = 90,
     .start_pin = 4, .led_pin = 48, .estop_pin = 6, .base_pin = 15
 };
 
@@ -57,10 +57,7 @@ int main(void) {
     assert(!bench_servo_init(NULL, NULL, &config) && !bench_servo_init(&s, NULL, NULL));
     assert(!bench_servo_init(&s, &partial, &config));
     bench_servo_config_t bad = config;
-    bad.min_us = 300; assert(!bench_servo_init(&s, NULL, &bad));
-    bad = config; bad.max_us = 2700; assert(!bench_servo_init(&s, NULL, &bad));
-    bad = config; bad.min_us = 2400; assert(!bench_servo_init(&s, NULL, &bad));
-    bad = config; bad.max_dps = 0; assert(!bench_servo_init(&s, NULL, &bad));
+    bad.max_dps = 0; assert(!bench_servo_init(&s, NULL, &bad));
     bad = config; bad.max_dps = 361; assert(!bench_servo_init(&s, NULL, &bad));
     assert(bench_servo_init(&s, NULL, &config) && !bench_servo_init(&s, NULL, &config));
     assert(!bench_servo_enabled(&s));
@@ -82,19 +79,19 @@ int main(void) {
     assert(m.attaches == 0 && m.writes == 0 && bench_servo_channels(&s) == 0);
 
     /* First command jumps to the target: 0, 90 and 180 degrees map onto the pulse range. */
-    assert(bench_servo_set(&s, 16, 0) == BENCH_SERVO_OK && m.pulse[0] == 600 && m.pins[0] == 16);
-    assert(bench_servo_set(&s, 17, 90) == BENCH_SERVO_OK && m.pulse[1] == 1500);
-    assert(bench_servo_set(&s, 18, 180) == BENCH_SERVO_OK && m.pulse[2] == 2400);
+    assert(bench_servo_set(&s, 16, 0) == BENCH_SERVO_OK && m.pulse[0] == 1666 && m.pins[0] == 16);
+    assert(bench_servo_set(&s, 17, 90) == BENCH_SERVO_OK && m.pulse[1] == 939);
+    assert(bench_servo_set(&s, 18, 180) == BENCH_SERVO_OK && m.pulse[2] == 1744);
     assert(bench_servo_channels(&s) == 3 && m.writes == 3);
 
     /* Later commands on a known pin are slew limited and non-blocking. */
     assert(bench_servo_set(&s, 16, 180) == BENCH_SERVO_OK);
-    assert(bench_servo_channels(&s) == 3 && m.writes == 3 && m.pulse[0] == 600);
+    assert(bench_servo_channels(&s) == 3 && m.writes == 3 && m.pulse[0] == 1666);
     bench_servo_poll(&s, 0);
     for (int t = 10; t <= 1000; t += 10) bench_servo_poll(&s, t);
-    assert(m.pulse[0] >= 1499 && m.pulse[0] <= 1501);      /* 90 deg after 1 s at 90 deg/s */
+    assert(m.pulse[0] >= 1915 && m.pulse[0] <= 1917);      /* 90 deg after 1 s at 90 deg/s */
     for (int t = 1010; t <= 2000; t += 10) bench_servo_poll(&s, t);
-    assert(m.pulse[0] == 2400);                              /* arrives, never overshoots */
+    assert(m.pulse[0] == 2166);                              /* arrives, never overshoots */
     bench_servo_poll(&s, 2100);                              /* float accumulation settles on target */
     unsigned writes = m.writes;
     bench_servo_poll(&s, 2110);
@@ -102,14 +99,14 @@ int main(void) {
     assert(bench_servo_set(&s, 16, 0) == BENCH_SERVO_OK);
     bench_servo_poll(&s, 2110);                              /* no time elapsed: no motion */
     bench_servo_poll(&s, 2105);                              /* clock going backwards: no motion */
-    assert(m.pulse[0] == 2400 && !bench_servo_faulted(&s));
+    assert(m.pulse[0] == 2166 && !bench_servo_faulted(&s));
     bench_servo_poll(&s, 5000);
-    assert(m.pulse[0] == 600);
+    assert(m.pulse[0] == 1666);
 
     /* Channel table is bounded; reusing a pin does not consume a channel. */
     assert(bench_servo_set(&s, 8, 45) == BENCH_SERVO_OK && bench_servo_set(&s, 9, 45) == BENCH_SERVO_OK);
     assert(bench_servo_channels(&s) == BENCH_SERVO_MAX_CHANNELS);
-    assert(bench_servo_set(&s, 21, 45) == BENCH_SERVO_NO_CHANNEL);
+    assert(bench_servo_set(&s, 21, 45) == BENCH_SERVO_BAD_GPIO);
     assert(bench_servo_set(&s, 9, 90) == BENCH_SERVO_OK);
     assert(bench_servo_channels(&s) == BENCH_SERVO_MAX_CHANNELS);
 

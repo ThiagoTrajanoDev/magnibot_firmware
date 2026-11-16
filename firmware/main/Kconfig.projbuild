@@ -20,22 +20,6 @@ config MAGNIBOT_BENCH_SERVO
         (giro continuo) e recusado. A emergencia para os pulsos de PWM mas nao e
         um corte fisico de potencia.
 
-config MAGNIBOT_SERVO_MIN_US
-    int "Largura de pulso em 0 grau (us)"
-    depends on MAGNIBOT_BENCH_SERVO
-    range 400 1500
-    default 600
-    help
-        Valor conservador; calibre com o servo livre para nao forcar o batente.
-
-config MAGNIBOT_SERVO_MAX_US
-    int "Largura de pulso em 180 graus (us)"
-    depends on MAGNIBOT_BENCH_SERVO
-    range 1500 2600
-    default 2400
-    help
-        Valor conservador; calibre com o servo livre para nao forcar o batente.
-
 config MAGNIBOT_SERVO_MAX_DPS
     int "Velocidade maxima de variacao (graus por segundo)"
     depends on MAGNIBOT_BENCH_SERVO

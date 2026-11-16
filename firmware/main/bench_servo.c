@@ -1,19 +1,41 @@
 #include "bench_servo.h"
 #include "gpio_policy.h"
+#include "config.h"
 #include <stddef.h>
 
-#define PULSE_MIN_LIMIT_US 400
-#define PULSE_MAX_LIMIT_US 2600
 #define MAX_DPS_LIMIT 360
 
-static unsigned pulse_us(const bench_servo_config_t *config, float degrees) {
-    return (unsigned)(config->min_us +
-        (config->max_us - config->min_us) * degrees / BENCH_SERVO_MAX_DEGREES + 0.5f);
+typedef struct {
+    int gpio;
+    unsigned at_zero_us, neutral_us, at_full_us;
+} joint_pwm_t;
+
+/* pinos_e_limites.xlsx, aba Limites juntas. Referências de bancada. */
+static const joint_pwm_t joint_pwm[] = {
+    {SERVO_OMBRO_GPIO,      1666, 1916, 2166},
+    {SERVO_COTOVELO_GPIO,   1378,  939,  500},
+    {SERVO_PUNHO_ROT_GPIO,   666, 1205, 1744},
+    {SERVO_PUNHO_FLEX_GPIO,  700, 1400, 2100},
+    {SERVO_GARRA_GPIO,       666, 1000, 1333},
+};
+
+static const joint_pwm_t *find_joint(int gpio) {
+    for (unsigned i = 0; i < sizeof(joint_pwm) / sizeof(joint_pwm[0]); ++i)
+        if (joint_pwm[i].gpio == gpio) return &joint_pwm[i];
+    return NULL;
 }
 
 static hardware_result_t write_channel(bench_servo_t *servos, unsigned index) {
-    return servos->driver.write_us(servos->driver.context, index,
-                                   pulse_us(&servos->config, servos->channels[index].current));
+    const bench_servo_channel_t *channel = &servos->channels[index];
+    const joint_pwm_t *joint = find_joint(channel->gpio);
+    if (!joint) return IO_INVALID;
+    const float center = BENCH_SERVO_MAX_DEGREES / 2.0f;
+    const float degrees = channel->current;
+    const float low = degrees <= center ? joint->at_zero_us : joint->neutral_us;
+    const float high = degrees <= center ? joint->neutral_us : joint->at_full_us;
+    const float offset = degrees <= center ? degrees : degrees - center;
+    const unsigned pulse = (unsigned)(low + (high - low) * offset / center + 0.5f);
+    return servos->driver.write_us(servos->driver.context, index, pulse);
 }
 
 static void fail(bench_servo_t *servos) {
@@ -24,8 +46,7 @@ static void fail(bench_servo_t *servos) {
 bool bench_servo_init(bench_servo_t *servos, const bench_servo_driver_t *driver,
                       const bench_servo_config_t *config) {
     if (!servos || !config || servos->initialized) return false;
-    if (config->min_us < PULSE_MIN_LIMIT_US || config->max_us > PULSE_MAX_LIMIT_US ||
-        config->min_us >= config->max_us || config->max_dps == 0 || config->max_dps > MAX_DPS_LIMIT)
+    if (config->max_dps == 0 || config->max_dps > MAX_DPS_LIMIT)
         return false;
     if (driver && (!driver->attach || !driver->write_us || !driver->shutdown)) return false;
     *servos = (bench_servo_t){.config = *config, .initialized = true};
@@ -38,7 +59,7 @@ bench_servo_result_t bench_servo_set(bench_servo_t *servos, int gpio, int degree
     if (servos->latched) return BENCH_SERVO_STOPPED;
     if (degrees < 0 || degrees > BENCH_SERVO_MAX_DEGREES) return BENCH_SERVO_BAD_ANGLE;
     const bench_servo_config_t *config = &servos->config;
-    if (!gpio_policy_servo_allowed(gpio, config->start_pin, config->led_pin,
+    if (!find_joint(gpio) || !gpio_policy_servo_allowed(gpio, config->start_pin, config->led_pin,
                                    config->estop_pin, config->base_pin))
         return BENCH_SERVO_BAD_GPIO;
     for (unsigned i = 0; i < servos->used; ++i) {
