@@ -11,7 +11,7 @@ static const uint64_t reserved =
 
 /* Pins the schematic (config.h) assigns to inputs: never a servo output. */
 static const uint64_t input_pins =
-    PIN(BTN_EMERG_GPIO) | PIN(BTN_FIM_GPIO) | PIN(POT_GPIO) | PIN(ENC_SW_GPIO) |
+    PIN(BTN_EMERG_GPIO) | PIN(POT_GPIO) | PIN(ENC_SW_GPIO) |
     PIN(ENC_CLK_GPIO) | PIN(ENC_DT_GPIO) | PIN(I2C_SDA_GPIO) | PIN(I2C_SCL_GPIO);
 static const uint64_t servo_pins =
     PIN(SERVO_BASE_GPIO) | PIN(SERVO_OMBRO_GPIO) | PIN(SERVO_COTOVELO_GPIO) |

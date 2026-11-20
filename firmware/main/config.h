@@ -33,12 +33,11 @@
 // BOTOES E ENTRADAS (ativos em nivel baixo, com pull-up)
 // ======================================
 
-#define BTN_START_GPIO  4
+#define BTN_START_GPIO  7 // ajuste de bancada; fim de curso adiado
 // Emergencia: borda de descida com interrupcao. O firmware a habilita por
 // CONFIG_MAGNIBOT_ESTOP_GPIO (Kconfig, padrao = BTN_EMERG_GPIO); gpio_policy a
 // reserva para a emergencia.
 #define BTN_EMERG_GPIO  6
-#define BTN_FIM_GPIO    7     // fim de curso (referencia do grau 0); sem driver ainda
 
 #define POT_GPIO        5     // potenciometro (ADC); sem driver ainda
 #define ENC_SW_GPIO    10     // encoder KY-040; sem driver ainda
