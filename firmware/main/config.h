@@ -45,7 +45,7 @@
 #define ENC_DT_GPIO    14
 
 // ======================================
-// SENSOR I2C (VL53L0X) - sem driver ainda
+// SENSOR I2C (VL53L0X)
 // ======================================
 
 #define I2C_SDA_GPIO  11
