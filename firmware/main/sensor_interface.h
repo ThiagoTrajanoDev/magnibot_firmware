@@ -29,5 +29,7 @@ bool sensor_interface_init(sensor_interface_t *interface, sensor_data_t *data,
                            const sensor_driver_t *distance, const sensor_driver_t *current,
                            uint32_t period_ms, uint32_t timeout_ms, uint32_t max_age_ms);
 void sensor_interface_poll(sensor_interface_t *interface, int64_t now_ms);
+/* Finish pending conversions, but optionally defer new requests during motion. */
+void sensor_interface_poll_enabled(sensor_interface_t *interface, int64_t now_ms, bool allow_requests);
 void sensor_interface_stop(sensor_interface_t *interface);
 #endif

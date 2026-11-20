@@ -52,9 +52,10 @@ void sensor_interface_stop(sensor_interface_t *interface) {
     stop_channel(&interface->current, IO_LATCHED);
 }
 
-static void poll_channel(sensor_interface_t *interface, sensor_channel_t *channel, int64_t now_ms) {
+static void poll_channel(sensor_interface_t *interface, sensor_channel_t *channel, int64_t now_ms, bool allow_requests) {
     if (channel->driver.source == SENSOR_NONE) return;
     if (!channel->pending) {
+        if (!allow_requests) return;
         if (channel->requested_once && now_ms - channel->requested_ms < interface->period_ms) return;
         channel->requested_once = true;
         channel->requested_ms = now_ms;
@@ -98,7 +99,7 @@ static void poll_channel(sensor_interface_t *interface, sensor_channel_t *channe
     channel->last_result = IO_OK;
 }
 
-void sensor_interface_poll(sensor_interface_t *interface, int64_t now_ms) {
+void sensor_interface_poll_enabled(sensor_interface_t *interface, int64_t now_ms, bool allow_requests) {
     if (!interface || !interface->initialized || interface->stopped) return;
     if (now_ms < interface->last_ms || now_ms < 0) {
         interface->stopped = true;
@@ -107,6 +108,10 @@ void sensor_interface_poll(sensor_interface_t *interface, int64_t now_ms) {
         return;
     }
     interface->last_ms = now_ms;
-    poll_channel(interface, &interface->distance, now_ms);
-    poll_channel(interface, &interface->current, now_ms);
+    poll_channel(interface, &interface->distance, now_ms, allow_requests);
+    poll_channel(interface, &interface->current, now_ms, allow_requests);
+}
+
+void sensor_interface_poll(sensor_interface_t *interface, int64_t now_ms) {
+    sensor_interface_poll_enabled(interface, now_ms, true);
 }

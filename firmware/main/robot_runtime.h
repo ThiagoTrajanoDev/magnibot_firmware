@@ -22,5 +22,6 @@ bool robot_runtime_init(void);
 bool robot_runtime_init_with_distance(const sensor_driver_t *driver);
 bool robot_runtime_distance(int64_t now_ms, float *mm);
 void robot_runtime_poll(robot_state_t *state, int64_t now_ms);
+void robot_runtime_poll_with_acquisition(robot_state_t *state, int64_t now_ms, bool allow_requests);
 robot_runtime_status_t robot_runtime_status(int64_t now_ms);
 #endif

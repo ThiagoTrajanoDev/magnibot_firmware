@@ -78,6 +78,22 @@ int main(void) {
     driver=sensor_driver(&mock);driver.source=SENSOR_NONE;
     assert(!SENSOR_INIT(&data,&driver,NULL,50,200,500));
 
+    mock=(sensor_mock_t){.request_result=IO_OK,.poll_result=IO_OK,.value=123,.timestamp=20};
+    driver=sensor_driver(&mock);
+    assert(SENSOR_INIT(&data,&driver,NULL,50,200,500));
+    sensor_interface_poll_enabled(&acquisition,0,false);
+    assert(mock.requests==0);
+    sensor_interface_poll_enabled(&acquisition,10,true);
+    assert(mock.requests==1 && acquisition.distance.pending);
+    sensor_interface_poll_enabled(&acquisition,20,false);
+    assert(!acquisition.distance.pending && data.distance_mm.valid && mock.cancels==0);
+    sensor_interface_poll_enabled(&acquisition,1000,false);
+    assert(mock.requests==1 && mock.cancels==0);
+    sensor_interface_poll_enabled(&acquisition,1010,true);
+    assert(mock.requests==2 && acquisition.distance.pending);
+    sensor_interface_stop(&acquisition);
+    assert(mock.cancels==1 && acquisition.stopped);
+
     axis_limits_t limits[MOTION_AXES];motion_default_limits(limits);
     actuator_interface_t output;float degrees[MOTION_AXES]={0};
     assert(ACTUATOR_INIT(NULL,limits));
