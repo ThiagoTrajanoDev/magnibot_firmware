@@ -30,6 +30,7 @@ idf_component_register(
         esp_driver_i2c
         vl53l0x
         esp_driver_ledc
+        esp_driver_mcpwm
         esp_timer
         esp_driver_uart
         esp_driver_usb_serial_jtag
