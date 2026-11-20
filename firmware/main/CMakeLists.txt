@@ -30,5 +30,6 @@ idf_component_register(
         vl53l0x
         esp_driver_ledc
         esp_timer
+        esp_driver_uart
         esp_driver_usb_serial_jtag
 )

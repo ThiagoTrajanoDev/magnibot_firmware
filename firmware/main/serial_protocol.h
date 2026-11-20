@@ -11,7 +11,8 @@
 typedef enum {
     COMMAND_STATUS, COMMAND_DIAGNOSTIC, COMMAND_START,
     COMMAND_CONFIRM, COMMAND_RESCAN, COMMAND_ESTOP,
-    COMMAND_SERVO  /* bare "<gpio> <degrees>" line, no MB1 frame */
+    COMMAND_SERVO,  /* bare "<gpio> <degrees>" line, no MB1 frame */
+    COMMAND_IDLE_POSE
 } serial_command_t;
 typedef enum {
     PROTOCOL_OK, PROTOCOL_BAD_FRAME, PROTOCOL_BAD_VERSION, PROTOCOL_BAD_ID,
@@ -22,6 +23,7 @@ typedef struct {
     bool id_valid;
     serial_command_t command;
     protocol_error_t error;
+    bool named_servo;
     int servo_gpio, servo_degrees;  /* valid for COMMAND_SERVO */
 } protocol_message_t;
 typedef struct {

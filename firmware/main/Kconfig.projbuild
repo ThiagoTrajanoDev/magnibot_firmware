@@ -33,4 +33,8 @@ config MAGNIBOT_TOF
     default n
     help
         Habilita apenas aquisicao de distancia. Nao autoriza atuadores.
+config MAGNIBOT_UART_COMMANDS
+    bool "Receber comandos pela UART do console"
+    depends on ESP_CONSOLE_UART
+    default n
 endmenu
