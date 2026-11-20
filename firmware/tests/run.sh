@@ -60,3 +60,6 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
     tests/test_shoulder_calibration.c main/bench_servo.c main/gpio_policy.c \
     -lm -o "$test_dir/test_shoulder_calibration"
 "$test_dir/test_shoulder_calibration"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
+    tests/test_base_scan.c main/base_scan.c -o "$test_dir/test_base_scan"
+"$test_dir/test_base_scan"

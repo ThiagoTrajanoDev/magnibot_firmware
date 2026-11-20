@@ -4,6 +4,7 @@ idf_component_register(
         "bench_control.c"
         "motion_model.c"
         "base_motion.c"
+        "base_scan.c"
         "sensor_data.c"
         "cycle_sequence.c"
         "robot_runtime.c"
