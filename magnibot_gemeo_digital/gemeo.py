@@ -1,9 +1,12 @@
 """Gêmeo digital do MagniBot: desenha em 3D o braço que está sendo comandado pelo ESP32.
 
 Como usar:
-    python gemeo.py --simular                 # sem o braço, com dados inventados
-    python gemeo.py --porta /dev/ttyACM0      # com o ESP32 (no Windows, algo como COM3)
+    python gemeo.py --simular                               # sem o braço, com dados inventados
+    python gemeo.py --porta /dev/ttyACM0                    # com o ESP32 (no Windows, algo como COM3)
     python gemeo.py --simular --imagem figura.png --em 12   # salva uma figura (12 s do ciclo)
+Debug:
+    python gemeo.py --esqueleto                             # palitos apresentando como o modelo deveria se comportar
+    python gemeo.py --pivos                                 # pontos representando os pivos de rotacao de cada parte do modelo 
 """
 import argparse
 import time
@@ -16,7 +19,8 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from braco import POSE_NEUTRA, calcular_pose
 from comandos import AJUDA, interpretar
-from modelo import ModeloBraco
+from modelo_stl import ModeloBraco
+#from modelo import ModeloBraco
 from leitor import ESTADOS, Simulador, abrir_serial, extrair_angulos, telemetria_em
 
 # Cor de cada estado (as mesmas cores planejadas para o LED da placa).
@@ -26,8 +30,9 @@ SUAVIZACAO = 0.3   # a cada quadro, o desenho anda 30% do caminho até o ângulo
 
 
 class Gemeo:
-    def __init__(self, fonte, esqueleto=False):
+    def __init__(self, fonte, esqueleto=False, pivos=False):
         self.esqueleto = esqueleto              # True: desenha também os "palitos" por cima
+        self.mostrar_pivos = pivos              # True: desenha pontos nos pivos das pecas
         self.modelo = ModeloBraco()
         self.fonte = fonte                      # LeitorSerial ou Simulador
         self.angulos_alvo = list(POSE_NEUTRA)   # último ângulo recebido
@@ -64,6 +69,14 @@ class Gemeo:
         # Peças do modelo 3D (uma coleção só; a cada quadro trocamos os polígonos).
         self.colecao = Poly3DCollection([], edgecolors=(0, 0, 0, 0.25), linewidths=0.4)
         self.ax.add_collection3d(self.colecao)
+
+        # Pivos debug
+        self.pontos_pivos = self.ax.scatter(
+            [0], [0], [0], s=300, c="red",
+            edgecolors="white", linewidths=1.2,
+            depthshade=False, zorder=100,
+        )
+        self.pontos_pivos.set_visible(self.mostrar_pivos)
 
         # Os "palitos" (esqueleto), úteis para conferir a geometria.
         self.linha_corpo, = self.ax.plot([], [], [], "-o", color="#0b6e8f", lw=6, ms=9)
@@ -143,6 +156,10 @@ class Gemeo:
         self.colecao.set_verts(poligonos)
         self.colecao.set_facecolor(cores)
 
+        if self.mostrar_pivos:
+            _, pontos = self.modelo.pontos_juntas(self.angulos_desenho)
+            self.pontos_pivos._offsets3d = (pontos[:, 0], pontos[:, 1], pontos[:, 2])
+
         pose = calcular_pose(self.angulos_desenho)
         corpo = pose["corpo"]
         self.linha_corpo.set_data_3d(corpo[:, 0], corpo[:, 1], corpo[:, 2])
@@ -200,10 +217,11 @@ def main():
     ap.add_argument("--esqueleto", action="store_true", help="mostra também os palitos por cima do modelo")
     ap.add_argument("--comando", action="append", help="comando para o modelo na figura, ex.: \"garra 150\" (pode repetir)")
     ap.add_argument("--em", type=float, default=12.0, help="instante do ciclo simulado para a figura, em segundos")
+    ap.add_argument("--pivos", action="store_true", help="mostra um ponto vermelho no pivô de cada junta (debug)")
     args = ap.parse_args()
 
     if args.imagem:                              # modo figura: útil para o relatório
-        gemeo = Gemeo(Simulador(), args.esqueleto)
+        gemeo = Gemeo(Simulador(), args.esqueleto, args.pivos)
         tel = telemetria_em(args.em)
         gemeo.telemetria = tel
         gemeo.ultima_msg = time.time()
@@ -225,7 +243,7 @@ def main():
     else:
         ap.error("informe --porta ou --simular")
 
-    gemeo = Gemeo(fonte, args.esqueleto)
+    gemeo = Gemeo(fonte, args.esqueleto, args.pivos)
     animacao = FuncAnimation(gemeo.fig, gemeo.quadro, interval=50, cache_frame_data=False)  # 20 quadros/s
     try:
         plt.show()
