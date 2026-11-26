@@ -67,7 +67,7 @@ static void cancel(void *context) {
     (void)context;
     if (!pending) return;
     pending = false;
-    /* A failed or timed-out conversion requires reinitializing the sensor on boot. */
+    /* A failed or timed-out conversion requires reinitializing the sensor. */
     fault = true;
 }
 

@@ -52,6 +52,20 @@ void sensor_interface_stop(sensor_interface_t *interface) {
     stop_channel(&interface->current, IO_LATCHED);
 }
 
+bool sensor_interface_set_distance_driver(sensor_interface_t *interface, const sensor_driver_t *driver) {
+    if (!interface || !interface->initialized || interface->stopped || !valid_driver(driver)) return false;
+    sensor_driver_t replacement = {0};
+    if (driver) replacement = *driver;
+    sensor_channel_t *channel = &interface->distance;
+    stop_channel(channel, IO_DISABLED);
+    sensor_sample_t *sample = channel->sample;
+    uint32_t failures = channel->failures;
+    *channel = (sensor_channel_t){
+        .driver = replacement, .sample = sample, .failures = failures, .last_result = IO_DISABLED
+    };
+    return true;
+}
+
 static void poll_channel(sensor_interface_t *interface, sensor_channel_t *channel, int64_t now_ms, bool allow_requests) {
     if (channel->driver.source == SENSOR_NONE) return;
     if (!channel->pending) {

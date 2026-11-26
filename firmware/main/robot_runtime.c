@@ -28,22 +28,28 @@ bool robot_runtime_init_with_distance(const sensor_driver_t *driver) {
     return initialized;
 }
 
-void robot_runtime_poll_with_acquisition(robot_state_t *state, int64_t now_ms, bool allow_requests) {
+static void poll_runtime(robot_state_t *state, int64_t now_ms, bool allow_requests, bool external) {
     if (!state) return;
     if (!initialized) { *state = ROBOT_ERROR; return; }
     if (*state == ROBOT_ERROR) {
         actuator_interface_stop(&output);
-        sensor_interface_stop(&acquisition);
         cycle_abort(&cycle, CYCLE_EMERGENCY);
     }
     sensor_interface_poll_enabled(&acquisition, now_ms, allow_requests);
     cycle_tick(&cycle, now_ms);
-    /* The cycle phase owns every non-emergency state; bench_control admits only emergencies. */
-    *state = cycle_robot_state(&cycle);
+    /* The physical executor owns its states; the generic cycle still propagates its latch. */
+    if (!external || cycle.phase == CYCLE_ERROR) *state = cycle_robot_state(&cycle);
     if (*state == ROBOT_ERROR) {
         actuator_interface_stop(&output);
-        sensor_interface_stop(&acquisition);
     }
+}
+
+void robot_runtime_poll_with_acquisition(robot_state_t *state, int64_t now_ms, bool allow_requests) {
+    poll_runtime(state, now_ms, allow_requests, false);
+}
+
+void robot_runtime_poll_external(robot_state_t *state, int64_t now_ms) {
+    poll_runtime(state, now_ms, true, true);
 }
 
 robot_runtime_status_t robot_runtime_status(int64_t now_ms) {
@@ -77,4 +83,12 @@ bool robot_runtime_distance(int64_t now_ms, float *mm) {
 
 void robot_runtime_poll(robot_state_t *state, int64_t now_ms) {
     robot_runtime_poll_with_acquisition(state, now_ms, true);
+}
+
+sensor_sample_t robot_runtime_distance_sample(void) {
+    return sensors.distance_mm;
+}
+
+bool robot_runtime_set_distance_driver(const sensor_driver_t *driver) {
+    return initialized && sensor_interface_set_distance_driver(&acquisition, driver);
 }

@@ -21,6 +21,10 @@ typedef struct {
 bool robot_runtime_init(void);
 bool robot_runtime_init_with_distance(const sensor_driver_t *driver);
 bool robot_runtime_distance(int64_t now_ms, float *mm);
+sensor_sample_t robot_runtime_distance_sample(void);
+bool robot_runtime_set_distance_driver(const sensor_driver_t *driver);
+/* Sensor servicing for the physical bench executor, without replacing its operational state. */
+void robot_runtime_poll_external(robot_state_t *state, int64_t now_ms);
 void robot_runtime_poll(robot_state_t *state, int64_t now_ms);
 void robot_runtime_poll_with_acquisition(robot_state_t *state, int64_t now_ms, bool allow_requests);
 robot_runtime_status_t robot_runtime_status(int64_t now_ms);
