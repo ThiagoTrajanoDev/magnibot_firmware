@@ -68,3 +68,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
     main/gpio_policy.c main/state_machine.c main/bench_control.c main/cycle_sequence.c \
     main/motion_model.c main/sensor_data.c -lm -o "$test_dir/test_scan_workflow"
 "$test_dir/test_scan_workflow"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
+    tests/test_pickup_sequence.c main/pickup_sequence.c main/base_scan.c main/bench_servo.c \
+    main/gpio_policy.c main/sensor_data.c -lm -o "$test_dir/test_pickup_sequence"
+"$test_dir/test_pickup_sequence"

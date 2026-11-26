@@ -37,6 +37,14 @@ config MAGNIBOT_TOF
     default n
     help
         Habilita apenas aquisicao de distancia. Nao autoriza atuadores.
+config MAGNIBOT_PICKUP
+    bool "Habilitar pega automatica com curso de aproximacao calibrado"
+    depends on MAGNIBOT_BASE_SCAN && MAGNIBOT_TOF
+    default n
+    help
+        Apos confirmar o alvo, aproxima ate 60 mm com leituras hardware validas,
+        fecha garra, eleva o ombro, retorna a base e abre a garra.
+        Exige validar os limites do plano na montagem atual antes de habilitar.
 config MAGNIBOT_TOF_DIAGNOSTIC
     bool "Repetir diagnostico VL53L0X sem PWM"
     depends on MAGNIBOT_TOF && !MAGNIBOT_BENCH_SERVO

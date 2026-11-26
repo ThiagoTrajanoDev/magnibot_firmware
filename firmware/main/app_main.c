@@ -16,6 +16,7 @@
 #include "gpio_policy.h"
 #include "bench_servo.h"
 #include "servo_pwm.h"
+#include "pickup_sequence.h"
 #include "esp_attr.h"
 
 static const char *TAG = "MAGNIBOT";
@@ -23,10 +24,15 @@ static portMUX_TYPE emergency_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool emergency_latched;
 static bench_servo_t servos;
 static base_scan_t base_scan;
+static pickup_sequence_t pickup;
 
-static void stop_motion(void) {
+static void stop_motion(bool physical_emergency) {
     base_scan_stop(&base_scan);
-    bench_servo_stop(&servos);
+    bool controlled_abort = pickup.phase == PICKUP_FAILED;
+    if (controlled_abort && !physical_emergency && !bench_servo_faulted(&servos))
+        bench_servo_hold(&servos);
+    else
+        bench_servo_stop(&servos);
 }
 
 /* ISR latches the request; the control loop performs PWM shutdown. No 10 us claim.
@@ -147,6 +153,16 @@ void app_main(void) {
     servo_pwm_base_driver(&base_driver);
 #endif
     base_scan_init(&base_scan, &base_driver);
+    const pickup_plan_t *pickup_plan = NULL;
+#if CONFIG_MAGNIBOT_PICKUP
+    const pickup_plan_t calibrated_pickup = {
+        .shoulder_floor_deg = 90, .elbow_limit_deg = 0, .wrist_flex_deg = 81,
+        .lift_delta_deg = 20, .approach_us_per_s = 33, .approach_us_per_s2 = 60,
+        .phase_timeout_ms = 60000, .sensor_max_age_ms = 200
+    };
+    pickup_plan = &calibrated_pickup;
+#endif
+    bool pickup_ok = pickup_sequence_init(&pickup, &servos, &base_scan, pickup_plan);
 #if CONFIG_MAGNIBOT_BASE_SCAN
     unsigned started_scan = 0;
 #endif
@@ -154,15 +170,15 @@ void app_main(void) {
 #if CONFIG_MAGNIBOT_BASE_SCAN
     serial_control_bind_scan(&base_scan);
 #endif
-    if (!runtime_ok || !button_ok || led_err != ESP_OK || emergency_err != ESP_OK ||
+    if (!pickup_ok || !runtime_ok || !button_ok || led_err != ESP_OK || emergency_err != ESP_OK ||
         servo_err != ESP_OK || serial_err != ESP_OK) {
         bench_control_event(&state, EVENT_EMERGENCY);
-        ESP_LOGE(TAG, "Falha de inicializacao: runtime=%d button=%d led=%s estop=%s servo=%s serial=%s",
-                 runtime_ok, button_ok, esp_err_to_name(led_err), esp_err_to_name(emergency_err),
+        ESP_LOGE(TAG, "Falha de inicializacao: pickup=%d runtime=%d button=%d led=%s estop=%s servo=%s serial=%s",
+                 pickup_ok, runtime_ok, button_ok, esp_err_to_name(led_err), esp_err_to_name(emergency_err),
                  esp_err_to_name(servo_err), esp_err_to_name(serial_err));
     }
-    ESP_LOGW(TAG, "BANCADA: estop_gpio=%d; servo_bancada=%d",
-             CONFIG_MAGNIBOT_ESTOP_GPIO, bench_servo_enabled(&servos));
+    ESP_LOGW(TAG, "BANCADA: estop_gpio=%d; servo_bancada=%d; pickup=%s",
+             CONFIG_MAGNIBOT_ESTOP_GPIO, bench_servo_enabled(&servos), pickup_phase_name(pickup.phase));
     robot_state_t led_state = state;
     led_control_update(led_state);
     int64_t next_telemetry = 0;
@@ -201,7 +217,7 @@ void app_main(void) {
         bool preparing = start_result == COMMAND_ACCEPTED;
         int64_t now = esp_timer_get_time() / 1000;
         if (state == ROBOT_ERROR) {
-            stop_motion();
+            stop_motion(emergency);
         }
 #if CONFIG_MAGNIBOT_BASE_SCAN
         robot_runtime_poll_external(&state, now);
@@ -220,6 +236,7 @@ void app_main(void) {
             if (servos.distance_ready &&
                 servos.scan_request_id != started_scan) {
                 started_scan = servos.scan_request_id;
+                if (!pickup_sequence_reset(&pickup)) bench_control_event(&state, EVENT_EMERGENCY);
                 if (state != ROBOT_ERROR && !base_scan_begin(&base_scan, now))
                     bench_control_event(&state, EVENT_EMERGENCY);
             }
@@ -229,12 +246,18 @@ void app_main(void) {
             servos.base_active = base_scan.moving;
             if (state == ROBOT_RUN_VARREDURA && base_scan.home)
                 state_machine_process_event(&state, EVENT_SCAN_DONE);
-
+            if (state == ROBOT_RUN_DESLOCAMENTO && base_scan.at_object && pickup.phase == PICKUP_READY)
+                pickup_sequence_start(&pickup, now);
+            pickup_sequence_poll(&pickup, now, &distance_sample, robot_runtime_status(now).distance_io);
+            servos.base_active = base_scan.moving;
+            if (pickup.phase == PICKUP_DONE)
+                state_machine_process_event(&state, EVENT_MOVE_DONE);
         }
+        if (pickup.phase == PICKUP_FAILED) bench_control_event(&state, EVENT_EMERGENCY);
         if (base_scan.fault) bench_control_event(&state, EVENT_EMERGENCY);
         if (bench_servo_faulted(&servos)) bench_control_event(&state, EVENT_EMERGENCY);
         if (state == ROBOT_ERROR) {
-            stop_motion();
+            stop_motion(emergency);
         }
 #if CONFIG_MAGNIBOT_TOF
         hardware_result_t distance_io = robot_runtime_status(now).distance_io;
@@ -267,6 +290,7 @@ void app_main(void) {
             float mm;
             if (robot_runtime_distance(now, &mm))
                 snprintf(distance, sizeof(distance), "%.0f", (double)mm);
+            const char *pickup_status = pickup_phase_name(pickup.phase);
             char target[160];
             snprintf(target, sizeof(target),
                 "\"target_valid\":%s,\"target_offset_ms\":%" PRId64 ",\"target_distance_mm\":%.0f",
@@ -274,22 +298,22 @@ void app_main(void) {
                 base_scan.found_offset_ms, (double)base_scan.found_distance_mm);
             if (base_scan.moving || servos.scan_pose_active)
                 printf("{\"type\":\"telemetry\",\"state\":\"%s\",\"distance_active\":true,"
-                       "\"distance_mm\":%s,\"distance_status\":\"%s\",\"base_phase\":%u,\"search_status\":\"%s\",%s}\n",
+                       "\"distance_mm\":%s,\"distance_status\":\"%s\",\"base_phase\":%u,\"search_status\":\"%s\",\"pickup_status\":\"%s\",\"pickup_fault\":\"%s\",%s}\n",
                        state_machine_get_name(state),
-                       distance, sensor_status_name(runtime.distance_status), base_scan.phase, search_status, target);
+                       distance, sensor_status_name(runtime.distance_status), base_scan.phase, search_status, pickup_status, pickup_fault_name(pickup.fault), target);
             else printf("{\"type\":\"telemetry\",\"version\":1,\"uptime_ms\":%" PRId64
                    ",\"state\":\"%s\",\"state_code\":%d," ROBOT_MODE_JSON ","
                    "\"estop_configured\":%s,\"angles_deg\":null,\"distance_mm\":%s,"
                    "\"distance_active\":%s,\"distance_status\":\"%s\","
                    "\"current_ma\":null,\"gripper_percent\":null,\"execution\":{\"backend\":\"%s\","
                    "\"axes_configured\":%u,\"phase\":\"%s\",\"fault\":\"%s\"},"
-                   "\"search_status\":\"%s\",%s,"
+                   "\"search_status\":\"%s\",\"pickup_status\":\"%s\",\"pickup_fault\":\"%s\",%s,"
                    "\"bench_servo\":{\"enabled\":%s,\"channels\":%u},\"stack_min_free_bytes\":%u}\n",
                    now, state_machine_get_name(state), state,
                    CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
                    distance, "true",
                    sensor_status_name(runtime.distance_status), runtime.backend, runtime.axes_configured, cycle_phase_name(runtime.phase),
-                   cycle_fault_name(runtime.fault), search_status, target, bench_servo_enabled(&servos) ? "true" : "false",
+                   cycle_fault_name(runtime.fault), search_status, pickup_status, pickup_fault_name(pickup.fault), target, bench_servo_enabled(&servos) ? "true" : "false",
                    bench_servo_channels(&servos), (unsigned)uxTaskGetStackHighWaterMark(NULL));
             next_telemetry = now + 500;
         }
