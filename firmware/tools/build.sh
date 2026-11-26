@@ -9,4 +9,5 @@ else
     echo 'Ative o ambiente ESP-IDF instalado antes de executar tools/build.sh.' >&2
     exit 1
 fi
-"${idf[@]}" -B build/bench build
+"${idf[@]}" -B build/bench -D "SDKCONFIG=$PWD/build/bench/sdkconfig" \
+    -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.bench' build

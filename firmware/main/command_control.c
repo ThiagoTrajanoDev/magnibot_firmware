@@ -39,7 +39,8 @@ command_result_t command_control_servo(robot_state_t *state, bench_servo_t *serv
                                        int gpio, float degrees) {
     if (!state) return COMMAND_INVALID;
     if (*state == ROBOT_ERROR) return COMMAND_EMERGENCY_LATCHED;
-    if (servos && (servos->scan_pose_active || servos->base_active)) return COMMAND_MOTION_BLOCKED;
+    if (*state != ROBOT_IDLE || (servos && (servos->scan_pose_active || servos->base_active)))
+        return COMMAND_MOTION_BLOCKED;
     switch (bench_servo_set(servos, gpio, degrees)) {
         case BENCH_SERVO_OK: return COMMAND_ACCEPTED;
         case BENCH_SERVO_DISABLED: return COMMAND_SERVO_DISABLED;
@@ -51,6 +52,43 @@ command_result_t command_control_servo(robot_state_t *state, bench_servo_t *serv
             return COMMAND_SERVO_FAULT;
     }
 }
+command_result_t command_control_prepare_scan(robot_state_t *state, bench_servo_t *servos) {
+    if (!state) return COMMAND_INVALID;
+    if (*state == ROBOT_ERROR) return COMMAND_EMERGENCY_LATCHED;
+    if (*state != ROBOT_IDLE) return COMMAND_MOTION_BLOCKED;
+    if (!bench_servo_enabled(servos)) return COMMAND_SERVO_DISABLED;
+    return bench_servo_prepare_scan(servos) ? COMMAND_ACCEPTED : COMMAND_POSE_NOT_READY;
+}
+
+command_result_t command_control_scan_event(robot_state_t *state, bench_servo_t *servos,
+    base_scan_t *scan, robot_event_t event, int64_t now_ms) {
+    if (!state || !scan) return COMMAND_INVALID;
+    if (*state == ROBOT_ERROR) return COMMAND_EMERGENCY_LATCHED;
+    if (scan->latched || scan->fault || scan->moving || !scan->driver.write_us ||
+        !scan->driver.shutdown || now_ms < 0 || now_ms < scan->last_ms)
+        return COMMAND_MOTION_BLOCKED;
+    if ((*state == ROBOT_IDLE && event == EVENT_SINGLE_CLICK) ||
+        (*state == ROBOT_VARREDURA_CONCLUIDA && event == EVENT_LONG_PRESS)) {
+        robot_state_t idle = ROBOT_IDLE;
+        command_result_t result = command_control_prepare_scan(&idle, servos);
+        if (result != COMMAND_ACCEPTED) return result;
+        scan->found = scan->no_object = scan->home = scan->at_object = false;
+        scan->found_distance_mm = 0;
+        scan->found_offset_ms = 0;
+        state_machine_process_event(state, event);
+        return COMMAND_ACCEPTED;
+    }
+    if (*state == ROBOT_VARREDURA_CONCLUIDA && event == EVENT_DOUBLE_CLICK) {
+        if (!base_scan_replay(scan, now_ms)) {
+            if (scan->fault) state_machine_process_event(state, EVENT_EMERGENCY);
+            return COMMAND_MOTION_BLOCKED;
+        }
+        state_machine_process_event(state, event);
+        return COMMAND_ACCEPTED;
+    }
+    return COMMAND_MOTION_BLOCKED;
+}
+
 const char *command_control_result_name(command_result_t result) {
     switch (result) {
         case COMMAND_ACCEPTED: return "ok";

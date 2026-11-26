@@ -28,6 +28,9 @@ static unsigned head, count;
 static uint32_t rx_messages, protocol_errors, dropped_responses;
 static bool initialized;
 static bench_servo_t *bench_servos;
+static base_scan_t *bench_scan;
+
+void serial_control_bind_scan(base_scan_t *scan) { bench_scan = scan; }
 
 static void increment(uint32_t *value) {
     if (*value != UINT32_MAX) ++*value;
@@ -65,14 +68,23 @@ static void accept_message(const protocol_message_t *message, robot_state_t *sta
         return;
     increment(&rx_messages);
     if (message->error == PROTOCOL_OK) {
+        if (message->command == COMMAND_ESTOP) bench_servo_stop(bench_servos);
         result = message->command == COMMAND_SERVO
             ? command_control_servo(state, bench_servos, message->servo_gpio, reference)
             : command_control_execute(state, message->command);
-        if ((message->command == COMMAND_START || message->command == COMMAND_IDLE_POSE) &&
-            *state == ROBOT_IDLE && bench_servo_enabled(bench_servos)) {
-            bool accepted = message->command == COMMAND_IDLE_POSE
-                ? bench_servo_idle_pose(bench_servos) : bench_servo_prepare_scan(bench_servos);
-            result = accepted ? COMMAND_ACCEPTED : COMMAND_POSE_NOT_READY;
+        if (bench_scan && (message->command == COMMAND_START || message->command == COMMAND_CONFIRM ||
+                           message->command == COMMAND_RESCAN)) {
+            robot_event_t event = message->command == COMMAND_START ? EVENT_SINGLE_CLICK :
+                message->command == COMMAND_CONFIRM ? EVENT_DOUBLE_CLICK : EVENT_LONG_PRESS;
+            int64_t now = esp_timer_get_time() / 1000;
+            result = command_control_scan_event(state, bench_servos, bench_scan, event, now);
+        } else if ((message->command == COMMAND_START || message->command == COMMAND_IDLE_POSE) &&
+                   *state == ROBOT_IDLE && bench_servo_enabled(bench_servos)) {
+            if (message->command == COMMAND_IDLE_POSE) {
+                result = bench_servo_idle_pose(bench_servos) ? COMMAND_ACCEPTED : COMMAND_POSE_NOT_READY;
+            } else {
+                result = command_control_prepare_scan(state, bench_servos);
+            }
         }
     } else {
         increment(&protocol_errors);

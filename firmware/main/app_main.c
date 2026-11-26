@@ -10,6 +10,7 @@
 #include "led_control.h"
 #include "bench_control.h"
 #include "serial_control.h"
+#include "command_control.h"
 #include "robot_runtime.h"
 #include "tof_vl53l0x.h"
 #include "gpio_policy.h"
@@ -23,7 +24,12 @@ static bool emergency_latched;
 static bench_servo_t servos;
 static base_scan_t base_scan;
 
-/* No PWM driver is present: ISR only latches the request. No 10 us claim.
+static void stop_motion(void) {
+    base_scan_stop(&base_scan);
+    bench_servo_stop(&servos);
+}
+
+/* ISR latches the request; the control loop performs PWM shutdown. No 10 us claim.
  * Kept in IRAM so it does not depend on the flash cache. */
 static void IRAM_ATTR __attribute__((unused)) emergency_isr(void *arg) {
     (void)arg;
@@ -70,6 +76,15 @@ static esp_err_t servo_init(void) {
 #endif
     return bench_servo_init(&servos, backend, &config) ? ESP_OK : ESP_ERR_INVALID_ARG;
 }
+
+#if CONFIG_MAGNIBOT_TOF
+static bool joints_settled(void) {
+    if (servos.scan_pose_active || base_scan.moving) return false;
+    for (unsigned i = 0; i < servos.used; ++i)
+        if (servos.channels[i].current != servos.channels[i].target && !servos.latched) return false;
+    return true;
+}
+#endif
 
 #if CONFIG_MAGNIBOT_TOF_DIAGNOSTIC
 static void distance_diagnostic(void) {
@@ -136,6 +151,9 @@ void app_main(void) {
     unsigned started_scan = 0;
 #endif
     esp_err_t serial_err = serial_control_init(&servos);
+#if CONFIG_MAGNIBOT_BASE_SCAN
+    serial_control_bind_scan(&base_scan);
+#endif
     if (!runtime_ok || !button_ok || led_err != ESP_OK || emergency_err != ESP_OK ||
         servo_err != ESP_OK || serial_err != ESP_OK) {
         bench_control_event(&state, EVENT_EMERGENCY);
@@ -143,12 +161,15 @@ void app_main(void) {
                  runtime_ok, button_ok, esp_err_to_name(led_err), esp_err_to_name(emergency_err),
                  esp_err_to_name(servo_err), esp_err_to_name(serial_err));
     }
-    ESP_LOGW(TAG, "BANCADA: ciclo bloqueado; estop_gpio=%d; servo_bancada=%d",
+    ESP_LOGW(TAG, "BANCADA: estop_gpio=%d; servo_bancada=%d",
              CONFIG_MAGNIBOT_ESTOP_GPIO, bench_servo_enabled(&servos));
     robot_state_t led_state = state;
     led_control_update(led_state);
     int64_t next_telemetry = 0;
     bool boot_idle_pending = true;
+#if CONFIG_MAGNIBOT_TOF
+    int64_t next_sensor_retry = 3000;
+#endif
     TickType_t next_control_tick = xTaskGetTickCount();
     for (;;) {
         portENTER_CRITICAL(&emergency_lock);
@@ -167,60 +188,108 @@ void app_main(void) {
         serial_control_poll(&state);
         robot_event_t event;
         bool gesture = button_ok && button_control_update(&start, &event);
-        bool preparing = gesture && event == EVENT_SINGLE_CLICK && state == ROBOT_IDLE &&
-                         bench_servo_prepare_scan(&servos);
-        if (gesture && !preparing) bench_control_event(&state, event);
+        command_result_t start_result = COMMAND_INVALID;
+        if (gesture) {
+#if CONFIG_MAGNIBOT_BASE_SCAN
+            int64_t event_ms = esp_timer_get_time() / 1000;
+            start_result = command_control_scan_event(&state, &servos, &base_scan, event, event_ms);
+#else
+            if (event == EVENT_SINGLE_CLICK)
+                start_result = command_control_prepare_scan(&state, &servos);
+#endif
+        }
+        bool preparing = start_result == COMMAND_ACCEPTED;
         int64_t now = esp_timer_get_time() / 1000;
-        /* Servo slew, runtime (actuator stop) and LED react before any console output. */
+        if (state == ROBOT_ERROR) {
+            stop_motion();
+        }
+#if CONFIG_MAGNIBOT_BASE_SCAN
+        robot_runtime_poll_external(&state, now);
+#else
+        robot_runtime_poll(&state, now);
+#endif
+        now = esp_timer_get_time() / 1000;
+        portENTER_CRITICAL(&emergency_lock);
+        emergency = emergency_latched;
+        portEXIT_CRITICAL(&emergency_lock);
+        if (emergency) bench_control_event(&state, EVENT_EMERGENCY);
+        /* Motion and emergency handling precede all console output. */
         if (state != ROBOT_ERROR) {
             bench_servo_poll(&servos, now);
 #if CONFIG_MAGNIBOT_BASE_SCAN
             if (servos.distance_ready &&
                 servos.scan_request_id != started_scan) {
                 started_scan = servos.scan_request_id;
-                if (!base_scan_begin(&base_scan, now))
+                if (state != ROBOT_ERROR && !base_scan_begin(&base_scan, now))
                     bench_control_event(&state, EVENT_EMERGENCY);
             }
 #endif
-            base_scan_poll(&base_scan, now);
+            sensor_sample_t distance_sample = robot_runtime_distance_sample();
+            base_scan_poll(&base_scan, now, &distance_sample, robot_runtime_status(now).distance_io);
             servos.base_active = base_scan.moving;
+            if (state == ROBOT_RUN_VARREDURA && base_scan.home)
+                state_machine_process_event(&state, EVENT_SCAN_DONE);
+
         }
         if (base_scan.fault) bench_control_event(&state, EVENT_EMERGENCY);
         if (bench_servo_faulted(&servos)) bench_control_event(&state, EVENT_EMERGENCY);
         if (state == ROBOT_ERROR) {
-            base_scan_stop(&base_scan);
-            bench_servo_stop(&servos);
+            stop_motion();
         }
-        robot_runtime_poll_with_acquisition(&state, now, !servos.scan_pose_active);
+#if CONFIG_MAGNIBOT_TOF
+        hardware_result_t distance_io = robot_runtime_status(now).distance_io;
+        bool sensor_failed = distance_io != IO_OK && distance_io != IO_PENDING && distance_io != IO_INVALID;
+        if (sensor_failed && joints_settled() && now >= next_sensor_retry) {
+            next_sensor_retry = now + 3000;
+            if (robot_runtime_set_distance_driver(NULL)) {
+                sensor_driver_t recovered_driver;
+                esp_err_t recovered = tof_vl53l0x_init(&recovered_driver);
+                if (recovered == ESP_OK && robot_runtime_set_distance_driver(&recovered_driver))
+                    ESP_LOGI(TAG, "Sensor de distancia recuperado; estado %s", state_machine_get_name(state));
+                else
+                    ESP_LOGW(TAG, "Sensor ainda indisponivel: %s", esp_err_to_name(recovered));
+            }
+        }
+#endif
         if (state != led_state) {
             led_state = state;
             led_control_update(state);
         }
-        if (preparing) ESP_LOGI(TAG, "Iniciando varredura");
-        if (gesture && !preparing) ESP_LOGW(TAG, "Comando %d bloqueado: bancada sem atuadores validados", event);
+        if (preparing) ESP_LOGI(TAG, "Comando aceito: %s", state_machine_get_name(state));
+        if (gesture && !preparing) ESP_LOGW(TAG, "Comando %d bloqueado: %s", event,
+                                            command_control_result_name(start_result));
         serial_control_flush();
-        if (!servos.scan_pose_active && now >= next_telemetry) {
+        if (now >= next_telemetry) {
             robot_runtime_status_t runtime = robot_runtime_status(now);
+            const char *search_status = servos.scan_pose_active && servos.measure_after_pose
+                ? "positioning" : base_scan_status(&base_scan);
             char distance[24] = "null";
             float mm;
-            if (servos.distance_ready && robot_runtime_distance(now, &mm))
+            if (robot_runtime_distance(now, &mm))
                 snprintf(distance, sizeof(distance), "%.0f", (double)mm);
-            if (base_scan.moving)
-                printf("{\"type\":\"telemetry\",\"state\":\"VARREDURA\",\"distance_active\":true,"
-                       "\"distance_mm\":%s,\"distance_status\":\"%s\",\"base_phase\":%u}\n",
-                       distance, sensor_status_name(runtime.distance_status), base_scan.phase);
+            char target[160];
+            snprintf(target, sizeof(target),
+                "\"target_valid\":%s,\"target_offset_ms\":%" PRId64 ",\"target_distance_mm\":%.0f",
+                base_scan.found && !base_scan.latched && !base_scan.fault ? "true" : "false",
+                base_scan.found_offset_ms, (double)base_scan.found_distance_mm);
+            if (base_scan.moving || servos.scan_pose_active)
+                printf("{\"type\":\"telemetry\",\"state\":\"%s\",\"distance_active\":true,"
+                       "\"distance_mm\":%s,\"distance_status\":\"%s\",\"base_phase\":%u,\"search_status\":\"%s\",%s}\n",
+                       state_machine_get_name(state),
+                       distance, sensor_status_name(runtime.distance_status), base_scan.phase, search_status, target);
             else printf("{\"type\":\"telemetry\",\"version\":1,\"uptime_ms\":%" PRId64
                    ",\"state\":\"%s\",\"state_code\":%d," ROBOT_MODE_JSON ","
                    "\"estop_configured\":%s,\"angles_deg\":null,\"distance_mm\":%s,"
                    "\"distance_active\":%s,\"distance_status\":\"%s\","
                    "\"current_ma\":null,\"gripper_percent\":null,\"execution\":{\"backend\":\"%s\","
                    "\"axes_configured\":%u,\"phase\":\"%s\",\"fault\":\"%s\"},"
+                   "\"search_status\":\"%s\",%s,"
                    "\"bench_servo\":{\"enabled\":%s,\"channels\":%u},\"stack_min_free_bytes\":%u}\n",
                    now, state_machine_get_name(state), state,
                    CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
-                   distance, servos.distance_ready ? "true" : "false",
+                   distance, "true",
                    sensor_status_name(runtime.distance_status), runtime.backend, runtime.axes_configured, cycle_phase_name(runtime.phase),
-                   cycle_fault_name(runtime.fault), bench_servo_enabled(&servos) ? "true" : "false",
+                   cycle_fault_name(runtime.fault), search_status, target, bench_servo_enabled(&servos) ? "true" : "false",
                    bench_servo_channels(&servos), (unsigned)uxTaskGetStackHighWaterMark(NULL));
             next_telemetry = now + 500;
         }

@@ -12,6 +12,7 @@
 #include "serial_protocol.h"
 #include "driver/usb_serial_jtag.h"
 #include "bench_servo.h"
+#include "command_control.h"
 
 static const char *input;
 static size_t remaining;
@@ -43,6 +44,14 @@ static void feed(const char *text) {
     input = text; remaining = strlen(text);
     do { serial_control_poll(&state); serial_control_flush(); now += 10; } while (remaining);
 }
+static hardware_result_t distance_request(void *c, int64_t timestamp) {
+    (void)c; (void)timestamp; return IO_PENDING;
+}
+static hardware_result_t distance_poll(void *c, float *value, int64_t *timestamp) {
+    (void)c; *value=156; *timestamp=now; return IO_OK;
+}
+static void distance_cancel(void *c) { (void)c; }
+static hardware_result_t base_write(void *c, unsigned value) { (void)c; (void)value; return IO_OK; }
 int main(void) {
     assert(robot_runtime_init());
     serial_control_poll(NULL);
@@ -69,6 +78,8 @@ int main(void) {
     assert(ftell(capture) == before && servo_attaches == 0);
     feed("ombro 105\n");
     assert(servo_attaches == 1 && servo_pulse == 1667);
+    feed("ombro 0\n");
+    assert(state == ROBOT_IDLE && servos.channels[0].target == 0);
     feed("16 90\n");
     assert(servo_attaches == 1 && servo_pulse == 1667);
     feed("varredura\n");
@@ -104,6 +115,7 @@ int main(void) {
     assert(dropped && strtoul(dropped + strlen("\"dropped_responses\":"), NULL, 10) > 0);
     assert(strstr(output, "\"id\":null,\"ok\":true,\"code\":\"ok\""));
     assert(strstr(output, "\"servo\":{\"gpio\":16,\"target_deg\":90}"));
+    assert(strstr(output, "\"servo\":{\"gpio\":16,\"target_deg\":0}"));
     assert(strstr(output, "\"code\":\"gpio_not_allowed\""));
     assert(strstr(output, "\"code\":\"angle_out_of_range\""));
     assert(strstr(output, "\"bench_servo\":{\"enabled\":true,\"channels\":1}"));
@@ -128,5 +140,37 @@ int main(void) {
     assert(state == ROBOT_ERROR);
     bench_servo_stop(&servos);
     assert(!servos.scan_pose_active && servos.latched);
+    /* Bind the physical executor: UART uses the same gesture validation as GPIO Start. */
+    state = ROBOT_IDLE;
+    servos = (bench_servo_t){0};
+    assert(bench_servo_init(&servos, &servo_driver, &servo_config));
+    base_scan_driver_t base_driver={.write_us=base_write,.shutdown=servo_shutdown};
+    base_scan_t scan;
+    base_scan_init(&scan,&base_driver);
+    serial_control_bind_scan(&scan);
+    feed("varredura\n");
+    assert(state==ROBOT_RUN_VARREDURA && servos.scan_pose_active); /* No sensor required. */
+    sensor_driver_t distance_driver={.request=distance_request,.poll=distance_poll,
+        .cancel=distance_cancel,.source=SENSOR_HARDWARE};
+    assert(robot_runtime_set_distance_driver(&distance_driver));
+    robot_runtime_poll_external(&state,now);
+    feed("varredura\n");
+    assert(state==ROBOT_RUN_VARREDURA && servos.scan_pose_active);
+    feed("MB1 11 confirm\n"); assert(state==ROBOT_RUN_VARREDURA);
+    for (int i=0;i<10000 && servos.scan_pose_active;++i) {
+        bench_servo_poll(&servos,now); now+=10;
+    }
+    assert(servos.distance_ready && base_scan_begin(&scan,now));
+    sensor_sample_t object={.value=100,.timestamp_ms=now+10,.source=SENSOR_HARDWARE,.received=true,.valid=true};
+    now+=10; base_scan_poll(&scan,now,&object,IO_OK);
+    while (scan.moving) { now+=10; base_scan_poll(&scan,now,NULL,IO_OK); }
+    assert(scan.home && state_machine_process_event(&state,EVENT_SCAN_DONE));
+    /* Refresh sensor IO without overwriting the waiting state. */
+    robot_runtime_poll_external(&state,now);
+    feed("MB1 12 confirm\n");
+    assert(state==ROBOT_RUN_DESLOCAMENTO && scan.replaying);
+    feed("MB1 13 estop\n"); base_scan_stop(&scan);
+    assert(state==ROBOT_ERROR && servos.latched && scan.latched);
+    serial_control_bind_scan(NULL);
     puts("PASS: serial integration, init failure, fragmented RX, timeout, saturated queue emergency, diagnostics");
 }

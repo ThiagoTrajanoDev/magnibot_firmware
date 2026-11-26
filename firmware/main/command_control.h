@@ -4,6 +4,7 @@
 #include "state_machine.h"
 #include "bench_servo.h"
 #include "cycle_sequence.h"
+#include "base_scan.h"
 typedef enum {
     COMMAND_ACCEPTED, COMMAND_MOTION_BLOCKED, COMMAND_EMERGENCY_LATCHED,
     COMMAND_INVALID,
@@ -16,5 +17,8 @@ command_result_t command_control_cycle(cycle_sequence_t *cycle, const cycle_plan
 /* Bench servo command; refused after an emergency. A driver fault also forces ERROR. */
 command_result_t command_control_servo(robot_state_t *state, bench_servo_t *servos,
                                        int gpio, float degrees);
+command_result_t command_control_prepare_scan(robot_state_t *state, bench_servo_t *servos);
+command_result_t command_control_scan_event(robot_state_t *state, bench_servo_t *servos,
+    base_scan_t *scan, robot_event_t event, int64_t now_ms);
 const char *command_control_result_name(command_result_t result);
 #endif

@@ -45,6 +45,10 @@ config MAGNIBOT_UART_COMMANDS
     bool "Receber comandos pela UART do console"
     depends on ESP_CONSOLE_UART
     default n
+    help
+        Selecione somente para receber pelo conversor USB-UART ligado ao console
+        (GPIOs 43/44 no ESP32-S3). Para o conector USB nativo/JTAG, mantenha
+        desabilitado e habilite o console USB Serial/JTAG primario ou secundario.
 config MAGNIBOT_SHOULDER_MIN_US
     int "Ombro: menor pulso permitido na bancada (us)"
     depends on MAGNIBOT_BENCH_SERVO
