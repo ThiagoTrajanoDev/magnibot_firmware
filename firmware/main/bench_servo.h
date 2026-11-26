@@ -47,8 +47,19 @@ typedef struct {
     bool measure_after_pose, distance_ready, base_active;
     unsigned scan_request_id;
     int64_t last_ms;
-    bool initialized, latched, fault, shutdown_confirmed;
+    bool initialized, latched, fault, shutdown_confirmed, hard_stop_requested;
 } bench_servo_t;
+
+typedef struct {
+    int gpio;
+    float degrees, max_us_per_s, max_us_per_s2;
+} bench_servo_pose_joint_t;
+
+/* Smooth pose targets in terminal angle units; these are commanded, not measured angles. */
+bool bench_servo_move_pose(bench_servo_t *servos, const bench_servo_pose_joint_t *pose, unsigned count);
+bool bench_servo_named_angle(const bench_servo_t *servos, int gpio, float *degrees);
+/* Cancel the current trajectory at its last command, retaining PWM and accepting later targets. */
+bool bench_servo_pause(bench_servo_t *servos);
 
 /* NULL driver = disabled: every command is refused. Refuses a second init and bad config. */
 bool bench_servo_init(bench_servo_t *servos, const bench_servo_driver_t *driver,
@@ -59,11 +70,13 @@ bench_servo_result_t bench_servo_set(bench_servo_t *servos, int gpio, float degr
 bool bench_servo_prepare_scan(bench_servo_t *servos);
 bool bench_servo_idle_pose(bench_servo_t *servos);
 int bench_servo_named_gpio(const char *name);
-bool bench_servo_named_reference(int gpio, int degrees, float *reference);
+bool bench_servo_named_reference(int gpio, float degrees, float *reference);
 /* Non-blocking slew; call every loop. A driver failure latches and sets the fault flag. */
 void bench_servo_poll(bench_servo_t *servos, int64_t now_ms);
 /* Latches (no further commands) and stops the PWM; repeats shutdown until the driver confirms. */
 void bench_servo_stop(bench_servo_t *servos);
+/* Controlled search abort: latch commands while retaining the last positional PWM. */
+void bench_servo_hold(bench_servo_t *servos);
 bool bench_servo_enabled(const bench_servo_t *servos);
 bool bench_servo_faulted(const bench_servo_t *servos);
 unsigned bench_servo_channels(const bench_servo_t *servos);

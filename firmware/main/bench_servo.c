@@ -57,11 +57,11 @@ static float pulse_to_reference(const joint_pwm_t *joint, float pulse) {
     return 90 + 90 * (pulse - middle) / (full - middle);
 }
 
-bool bench_servo_named_reference(int gpio, int degrees, float *reference) {
+bool bench_servo_named_reference(int gpio, float degrees, float *reference) {
     const joint_pwm_t *joint = find_joint(gpio);
-    if (!joint || !reference || degrees < 0 || degrees > 180) return false;
+    if (!joint || !reference || !isfinite(degrees) || degrees < 0 || degrees > 180) return false;
     const int zero = joint->at_zero_us, full = joint->at_full_us;
-    const int pulse_scaled = 500 * 180 + degrees * 2000;
+    const float pulse_scaled = 500 * 180 + degrees * 2000;
     if (pulse_scaled < (zero < full ? zero : full) * 180 ||
         pulse_scaled > (zero > full ? zero : full) * 180) return false;
     *reference = pulse_to_reference(joint, pulse_scaled / 180.0f);
@@ -132,23 +132,18 @@ bench_servo_result_t bench_servo_set(bench_servo_t *servos, int gpio, float degr
     return result;
 }
 
-typedef struct {
-    int gpio, degrees;
-    float max_us_per_s, max_us_per_s2;
-} pose_joint_t;
-
-static const pose_joint_t scan_pose[] = {
+static const bench_servo_pose_joint_t scan_pose[] = {
     {SERVO_GARRA_GPIO, 180, 250, 375},
     {SERVO_PUNHO_FLEX_GPIO, 140, 262.5f, 406.25f},
-    {SERVO_COTOVELO_GPIO, 50, 112.5f, 187.5f},
-    {SERVO_OMBRO_GPIO, 100, 150, 200},
+    {SERVO_COTOVELO_GPIO, 65, 112.5f, 187.5f},
+    {SERVO_OMBRO_GPIO, 118, 150, 200},
 };
 
-static const pose_joint_t idle_pose[] = {
+static const bench_servo_pose_joint_t idle_pose[] = {
     {SERVO_GARRA_GPIO, 45, 200, 240},
     {SERVO_PUNHO_FLEX_GPIO, 81, 210, 260},
-    {SERVO_COTOVELO_GPIO, 40, 90, 120},
-    {SERVO_OMBRO_GPIO, 127, 60, 80},
+    {SERVO_COTOVELO_GPIO, 55, 90, 120},
+    {SERVO_OMBRO_GPIO, 145, 60, 80},
     {SERVO_PUNHO_ROT_GPIO, 63, 210, 260},
 };
 
@@ -166,12 +161,15 @@ static bool reapply_pose_end(bench_servo_t *servos) {
     return true;
 }
 
-static bool prepare_pose(bench_servo_t *servos, const pose_joint_t *pose, unsigned count,
-                         bool measure_after_pose) {
-    if (!bench_servo_enabled(servos) || servos->latched || servos->scan_pose_active || servos->base_active) return false;
+static bool prepare_pose(bench_servo_t *servos, const bench_servo_pose_joint_t *pose, unsigned count,
+                         bool measure_after_pose, bool sequential) {
+    if (!bench_servo_enabled(servos) || servos->latched || servos->scan_pose_active || servos->base_active ||
+        !pose || !count || count > BENCH_SERVO_MAX_CHANNELS) return false;
     float pose_targets[BENCH_SERVO_MAX_CHANNELS];
     for (unsigned i = 0; i < count; ++i) {
-        if (!bench_servo_named_reference(pose[i].gpio, pose[i].degrees, &pose_targets[i]) ||
+        if (!isfinite(pose[i].max_us_per_s) || pose[i].max_us_per_s <= 0 ||
+            !isfinite(pose[i].max_us_per_s2) || pose[i].max_us_per_s2 <= 0 ||
+            !bench_servo_named_reference(pose[i].gpio, pose[i].degrees, &pose_targets[i]) ||
             !gpio_policy_servo_allowed(pose[i].gpio, servos->config.start_pin,
                 servos->config.led_pin, servos->config.estop_pin, servos->config.base_pin))
             return false;
@@ -229,9 +227,32 @@ static bool prepare_pose(bench_servo_t *servos, const pose_joint_t *pose, unsign
             if (distance > 0) servos->scan_pose_active = true;
         }
     }
+    if (!sequential && servos->scan_pose_active) {
+        float normalized_speed = INFINITY, normalized_accel = INFINITY;
+        for (unsigned i = 0; i < servos->used; ++i) {
+            if (servos->scan_duration_ms[i] <= 0) continue;
+            const joint_pwm_t *joint = find_joint(servos->channels[i].gpio);
+            float distance = fabsf(reference_to_pulse(joint, servos->channels[i].target) - servos->scan_origin[i]);
+            float speed = servos->scan_speed_us_per_s[i] / distance;
+            float accel = 1.875f * speed * 1000 / servos->scan_ramp_ms[i];
+            normalized_speed = fminf(normalized_speed, speed);
+            normalized_accel = fminf(normalized_accel, accel);
+        }
+        /* One normalized curve keeps all joint progress proportional and respects every limit. */
+        float speed = fminf(normalized_speed, sqrtf(normalized_accel / 1.875f));
+        float ramp_ms = 1875 * speed / normalized_accel;
+        for (unsigned i = 0; i < servos->used; ++i) {
+            if (servos->scan_duration_ms[i] <= 0) continue;
+            const joint_pwm_t *joint = find_joint(servos->channels[i].gpio);
+            float distance = fabsf(reference_to_pulse(joint, servos->channels[i].target) - servos->scan_origin[i]);
+            servos->scan_duration_ms[i] = 1000 / speed + ramp_ms;
+            servos->scan_ramp_ms[i] = ramp_ms;
+            servos->scan_speed_us_per_s[i] = speed * distance;
+        }
+    }
     /* Gripper can settle alongside the wrist. Proximal joints wait their turn. */
     float start_ms = 0;
-    for (unsigned j = 1; j < count; ++j) {
+    for (unsigned j = 1; sequential && j < count; ++j) {
         for (unsigned i = 0; i < servos->used; ++i) {
             if (servos->channels[i].gpio != pose[j].gpio) continue;
             servos->scan_start_ms[i] = start_ms;
@@ -245,14 +266,37 @@ static bool prepare_pose(bench_servo_t *servos, const pose_joint_t *pose, unsign
     return completed;
 }
 
+bool bench_servo_move_pose(bench_servo_t *servos, const bench_servo_pose_joint_t *pose, unsigned count) {
+    return prepare_pose(servos, pose, count, false, false);
+}
+
+bool bench_servo_named_angle(const bench_servo_t *servos, int gpio, float *degrees) {
+    const joint_pwm_t *joint = find_joint(gpio);
+    if (!servos || !servos->initialized || !joint || !degrees) return false;
+    for (unsigned i = 0; i < servos->used; ++i) {
+        if (servos->channels[i].gpio != gpio) continue;
+        *degrees = (reference_to_pulse(joint, servos->channels[i].current) - 500) * 180 / 2000;
+        return true;
+    }
+    return false;
+}
+
+bool bench_servo_pause(bench_servo_t *servos) {
+    if (!bench_servo_enabled(servos) || servos->latched || servos->base_active) return false;
+    servos->scan_pose_active = servos->measure_after_pose = servos->distance_ready = false;
+    for (unsigned i = 0; i < servos->used; ++i)
+        servos->channels[i].target = servos->channels[i].current;
+    return true;
+}
+
 bool bench_servo_prepare_scan(bench_servo_t *servos) {
-    bool accepted = prepare_pose(servos, scan_pose, sizeof(scan_pose) / sizeof(scan_pose[0]), true);
+    bool accepted = prepare_pose(servos, scan_pose, sizeof(scan_pose) / sizeof(scan_pose[0]), true, true);
     if (accepted) ++servos->scan_request_id;
     return accepted;
 }
 
 bool bench_servo_idle_pose(bench_servo_t *servos) {
-    return prepare_pose(servos, idle_pose, sizeof(idle_pose) / sizeof(idle_pose[0]), false);
+    return prepare_pose(servos, idle_pose, sizeof(idle_pose) / sizeof(idle_pose[0]), false, true);
 }
 
 static float ramp_distance(float speed, float duration, float time) {
@@ -328,8 +372,23 @@ void bench_servo_poll(bench_servo_t *servos, int64_t now_ms) {
     }
 }
 
+void bench_servo_hold(bench_servo_t *servos) {
+    if (!servos || !servos->initialized) return;
+    if (servos->hard_stop_requested) {
+        bench_servo_stop(servos);
+        return;
+    }
+    servos->latched = true;
+    servos->scan_pose_active = false;
+    servos->distance_ready = false;
+    servos->base_active = false;
+    for (unsigned i = 0; i < servos->used; ++i)
+        servos->channels[i].target = servos->channels[i].current;
+}
+
 void bench_servo_stop(bench_servo_t *servos) {
     if (!servos || !servos->initialized) return;
+    servos->hard_stop_requested = true;
     servos->latched = true;
     servos->scan_pose_active = false;
     servos->distance_ready = false;

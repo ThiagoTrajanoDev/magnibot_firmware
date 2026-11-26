@@ -175,7 +175,7 @@ int main(void) {
     assert(!bench_servo_named_reference(8, -1, &reference));
     assert(!bench_servo_named_reference(8, 181, &reference));
     static const int joints[] = {9, 8, 17, 16};
-    static const unsigned expected[] = {2500, 2056, 1056, 1611};
+    static const unsigned expected[] = {2500, 2056, 1222, 1811};
     for (unsigned i = 0; i < 4; ++i)
         assert(bench_servo_set(&s, joints[i], 90) == BENCH_SERVO_OK);
     assert(bench_servo_prepare_scan(&s));
@@ -242,7 +242,7 @@ int main(void) {
 
     make(&s, &m);
     for (unsigned i = 0; i < 4; ++i) {
-        const int pose[] = {180, 140, 50, 100};
+        const int pose[] = {180, 140, 65, 118};
         assert(bench_servo_named_reference(joints[i], pose[i], &reference));
         assert(bench_servo_set(&s, joints[i], reference) == BENCH_SERVO_OK);
     }
@@ -252,7 +252,7 @@ int main(void) {
     /* Short wrist motion exercises a profile with acceleration and deceleration only. */
     make(&s, &m);
     for (unsigned i = 0; i < 4; ++i) {
-        const int pose[] = {180, 139, 50, 100};
+        const int pose[] = {180, 139, 65, 118};
         assert(bench_servo_named_reference(joints[i], pose[i], &reference));
         assert(bench_servo_set(&s, joints[i], reference) == BENCH_SERVO_OK);
     }
@@ -266,7 +266,7 @@ int main(void) {
     assert(!bench_servo_idle_pose(&s));
     for (int t = 10; t <= 60000; t += 10) bench_servo_poll(&s, t);
     assert(!s.scan_pose_active && !s.distance_ready && !s.fault);
-    const unsigned idle_pulses[] = {1000, 1400, 944, 1911, 1200};
+    const unsigned idle_pulses[] = {1000, 1400, 1111, 2111, 1200};
     for (unsigned i = 0; i < 5; ++i) assert(m.pulse[i] == idle_pulses[i]);
     bench_servo_stop(&s);
     assert(!bench_servo_idle_pose(&s));
@@ -277,6 +277,31 @@ int main(void) {
     assert(bench_servo_set(&s, 16, 90) == BENCH_SERVO_STOPPED);
     assert(!bench_servo_prepare_scan(&s) && !bench_servo_idle_pose(&s));
     assert(m.writes == 0);
+
+    make(&s, &m);
+    assert(bench_servo_set(&s,16,90)==BENCH_SERVO_OK);
+    assert(bench_servo_set(&s,16,180)==BENCH_SERVO_OK);
+    bench_servo_poll(&s,10);
+    unsigned held_writes=m.writes, held_pulse=m.pulse[0];
+    bench_servo_hold(&s);
+    assert(s.latched && !s.scan_pose_active && s.channels[0].target==s.channels[0].current);
+    bench_servo_poll(&s,10000);
+    assert(m.writes==held_writes && m.pulse[0]==held_pulse && m.shutdowns==0);
+    assert(bench_servo_set(&s,16,0)==BENCH_SERVO_STOPPED);
+    bench_servo_stop(&s);
+    assert(s.shutdown_confirmed && m.shutdowns==1);
+    bench_servo_hold(&s);bench_servo_poll(&s,10010);
+    assert(m.writes==held_writes && m.shutdowns==1);
+
+    make(&s, &m);
+    assert(bench_servo_set(&s,16,90)==BENCH_SERVO_OK);
+    m.shutdown_result=IO_FAULT;
+    bench_servo_stop(&s);
+    bench_servo_hold(&s);
+    assert(s.hard_stop_requested && !s.shutdown_confirmed && m.shutdowns==2);
+    m.shutdown_result=IO_OK;
+    bench_servo_hold(&s);
+    assert(s.shutdown_confirmed && m.shutdowns==3);
 
     const int full_range_pins[] = {16, 17, 18, 8, 9};
     for (unsigned i = 0; i < 5; ++i) {
