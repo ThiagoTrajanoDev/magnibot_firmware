@@ -5,7 +5,7 @@ firmware e de "angles_deg" na telemetria (bench_servo_named_angle, em firmware/m
 Os comandos digitados no gêmeo usam essa mesma unidade.
 
 O modelo 3D usa outra convenção (braco.py): 90 = a peça na posição em que o STL foi montado.
-A conversão de cada junta é:   modelo = 90 + sinal * (graus_do_servo - neutro)
+A conversão de cada junta é:   modelo = 90 + sinal * (graus_do_servo - neutro) + offset
 """
 from braco import NOMES, POSE_NEUTRA
 
@@ -15,17 +15,18 @@ def _graus(pulso_us):
     return (pulso_us - 500) * 180 / 2000
 
 
-# neutro: graus do servo em que a peça fica igual à pose do STL.
+# neutro: referência em graus do servo que coincide com a pose do STL quando offset é zero.
 #   Valores iniciais = pulso neutro calibrado no firmware (joint_pwm, em bench_servo.c), supondo que
 #   o neutro do firmware é a mesma pose do STL. CONFERIR NO BRAÇO e ajustar aqui se não for.
 # sinal: +1 se aumentar o grau do servo mexe a peça no mesmo sentido do modelo; -1 se é ao contrário.
 #   CONFERIR NO BRAÇO com "ombro 140", "cotovelo 60" etc. e comparar com o gêmeo.
+# offset: correção em graus do modelo, aplicada depois do sinal. Ex.: +3.0 soma 3° ao desenho.
 CALIBRACAO = {
-    "ombro":      {"neutro": _graus(1916), "sinal": +1},
-    "cotovelo":   {"neutro": _graus(939),  "sinal": -1},  # no firmware o cotovelo é invertido (2500 -> 500 us)
-    "punho_rot":  {"neutro": _graus(1205), "sinal": +1},
-    "punho_flex": {"neutro": _graus(1400), "sinal": +1},
-    "garra":      {"neutro": 90.0,         "sinal": +1},  # 0 = fechada e 180 = toda aberta, nos dois lados
+    "ombro":      {"neutro": _graus(1916), "sinal": +1, "offset": -20.0},
+    "cotovelo":   {"neutro": _graus(939),  "sinal": -1, "offset": 0.0},
+    "punho_rot":  {"neutro": _graus(1205), "sinal": +1, "offset": 0.0},
+    "punho_flex": {"neutro": _graus(1400), "sinal": +1, "offset": 0.0},
+    "garra":      {"neutro": 90.0,        "sinal": +1, "offset": 0.0},
 }
 
 # Base: servo de giro contínuo, sem encoder. O firmware só sabe por quanto tempo girou
@@ -43,7 +44,7 @@ def servo_para_modelo(angulos):
     modelo = [float(angulos[0])]
     for i, nome in enumerate(NOMES[1:], start=1):
         c = CALIBRACAO[nome]
-        modelo.append(POSE_NEUTRA[i] + c["sinal"] * (angulos[i] - c["neutro"]))
+        modelo.append(POSE_NEUTRA[i] + c["sinal"] * (angulos[i] - c["neutro"]) + c["offset"])
     return modelo
 
 
@@ -52,7 +53,7 @@ def modelo_para_servo(angulos):
     servo = [float(angulos[0])]
     for i, nome in enumerate(NOMES[1:], start=1):
         c = CALIBRACAO[nome]
-        servo.append(c["neutro"] + (angulos[i] - POSE_NEUTRA[i]) / c["sinal"])
+        servo.append(c["neutro"] + (angulos[i] - POSE_NEUTRA[i] - c["offset"]) / c["sinal"])
     return servo
 
 

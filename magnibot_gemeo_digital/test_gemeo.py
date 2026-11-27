@@ -47,8 +47,7 @@ def test_extrair_angulos():
 
 
 def test_calibracao():
-    assert np.allclose(servo_para_modelo(POSE_NEUTRA_SERVO), POSE_NEUTRA)     # neutro do servo = pose do STL
-    assert abs(POSE_NEUTRA_SERVO[1] - (1916 - 500) * 180 / 2000) < 1e-9       # ombro no pulso neutro do firmware
+    assert np.allclose(servo_para_modelo(POSE_NEUTRA_SERVO), POSE_NEUTRA)
     for ang in ([0, 90, 90, 90, 90, 90], [60, 55, 125, 90, 105, 150], [-45, 120, 70, 40, 130, 20]):
         assert np.allclose(servo_para_modelo(modelo_para_servo(ang)), ang)
     um_grau = servo_para_modelo([0, POSE_NEUTRA_SERVO[1] + 1] + POSE_NEUTRA_SERVO[2:])
