@@ -83,6 +83,39 @@ static esp_err_t servo_init(void) {
     return bench_servo_init(&servos, backend, &config) ? ESP_OK : ESP_ERR_INVALID_ARG;
 }
 
+/* Telemetry period: fast while anything moves so the digital twin follows the arm. */
+#define TELEMETRY_IDLE_MS 500
+#define TELEMETRY_MOVING_MS 100
+
+static bool any_joint_moving(void) {
+    if (servos.scan_pose_active || base_scan.moving) return true;
+    for (unsigned i = 0; i < servos.used; ++i)
+        if (servos.channels[i].current != servos.channels[i].target) return true;
+    return false;
+}
+
+/* Commanded joint angles in terminal units (same as "ombro 127"), never measured ones.
+ * The base has no encoder: base_drive_ms is the signed drive time (positive = pulse 1573). */
+static void format_angles(char *out, size_t size) {
+    static const struct { const char *name; int gpio; } joints[] = {
+        {"ombro", SERVO_OMBRO_GPIO}, {"cotovelo", SERVO_COTOVELO_GPIO},
+        {"punho_rot", SERVO_PUNHO_ROT_GPIO}, {"punho_flex", SERVO_PUNHO_FLEX_GPIO},
+        {"garra", SERVO_GARRA_GPIO},
+    };
+    size_t used = (size_t)snprintf(out, size, "\"angles_deg\":{");
+    for (unsigned i = 0; i < sizeof(joints) / sizeof(joints[0]) && used < size; ++i) {
+        float degrees;
+        const char *comma = i ? "," : "";
+        if (bench_servo_named_angle(&servos, joints[i].gpio, &degrees))
+            used += (size_t)snprintf(out + used, size - used, "%s\"%s\":%.1f", comma, joints[i].name,
+                                     (double)degrees);
+        else
+            used += (size_t)snprintf(out + used, size - used, "%s\"%s\":null", comma, joints[i].name);
+    }
+    if (used < size)
+        snprintf(out + used, size - used, "},\"base_drive_ms\":%" PRId64, base_scan.position_ms);
+}
+
 #if CONFIG_MAGNIBOT_TOF
 static bool joints_settled(void) {
     if (servos.scan_pose_active || base_scan.moving) return false;
@@ -296,26 +329,30 @@ void app_main(void) {
                 "\"target_valid\":%s,\"target_offset_ms\":%" PRId64 ",\"target_distance_mm\":%.0f",
                 base_scan.found && !base_scan.latched && !base_scan.fault ? "true" : "false",
                 base_scan.found_offset_ms, (double)base_scan.found_distance_mm);
+            char angles[192];
+            format_angles(angles, sizeof(angles));
+            const bool moving = any_joint_moving();
             if (base_scan.moving || servos.scan_pose_active)
-                printf("{\"type\":\"telemetry\",\"state\":\"%s\",\"distance_active\":true,"
-                       "\"distance_mm\":%s,\"distance_status\":\"%s\",\"base_phase\":%u,\"search_status\":\"%s\",\"pickup_status\":\"%s\",\"pickup_fault\":\"%s\",%s}\n",
-                       state_machine_get_name(state),
-                       distance, sensor_status_name(runtime.distance_status), base_scan.phase, search_status, pickup_status, pickup_fault_name(pickup.fault), target);
+                printf("{\"type\":\"telemetry\",\"version\":1,\"uptime_ms\":%" PRId64
+                       ",\"state\":\"%s\",\"state_code\":%d,\"distance_active\":true,"
+                       "\"distance_mm\":%s,\"distance_status\":\"%s\",\"base_phase\":%u,\"search_status\":\"%s\",\"pickup_status\":\"%s\",\"pickup_fault\":\"%s\",%s,%s}\n",
+                       now, state_machine_get_name(state), state,
+                       distance, sensor_status_name(runtime.distance_status), base_scan.phase, search_status, pickup_status, pickup_fault_name(pickup.fault), target, angles);
             else printf("{\"type\":\"telemetry\",\"version\":1,\"uptime_ms\":%" PRId64
                    ",\"state\":\"%s\",\"state_code\":%d," ROBOT_MODE_JSON ","
-                   "\"estop_configured\":%s,\"angles_deg\":null,\"distance_mm\":%s,"
+                   "\"estop_configured\":%s,%s,\"distance_mm\":%s,"
                    "\"distance_active\":%s,\"distance_status\":\"%s\","
                    "\"current_ma\":null,\"gripper_percent\":null,\"execution\":{\"backend\":\"%s\","
                    "\"axes_configured\":%u,\"phase\":\"%s\",\"fault\":\"%s\"},"
                    "\"search_status\":\"%s\",\"pickup_status\":\"%s\",\"pickup_fault\":\"%s\",%s,"
                    "\"bench_servo\":{\"enabled\":%s,\"channels\":%u},\"stack_min_free_bytes\":%u}\n",
                    now, state_machine_get_name(state), state,
-                   CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
+                   CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false", angles,
                    distance, "true",
                    sensor_status_name(runtime.distance_status), runtime.backend, runtime.axes_configured, cycle_phase_name(runtime.phase),
                    cycle_fault_name(runtime.fault), search_status, pickup_status, pickup_fault_name(pickup.fault), target, bench_servo_enabled(&servos) ? "true" : "false",
                    bench_servo_channels(&servos), (unsigned)uxTaskGetStackHighWaterMark(NULL));
-            next_telemetry = now + 500;
+            next_telemetry = now + (moving ? TELEMETRY_MOVING_MS : TELEMETRY_IDLE_MS);
         }
         if (xTaskDelayUntil(&next_control_tick, pdMS_TO_TICKS(10)) != pdTRUE)
             next_control_tick = xTaskGetTickCount();
