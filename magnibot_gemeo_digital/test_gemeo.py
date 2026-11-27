@@ -4,16 +4,20 @@ import math
 import numpy as np
 
 from braco import calcular_quadros, ALTURA_BASE, COMPR_ANTEBRACO, COMPR_BRACO, COMPR_PUNHO, POSE_NEUTRA, calcular_pose
-from leitor import LeitorSerial, extrair_angulos, interpretar_linha, telemetria_em
+from leitor import LeitorSerial, base_sem_calibracao, extrair_angulos, interpretar_linha, telemetria_em
+from calibracao import POSE_IDLE_SERVO, POSE_NEUTRA_SERVO, modelo_para_servo, servo_para_modelo
 
 # Linha real de telemetria do firmware (formato de app_main.c).
 LINHA_REAL = (
     '{"type":"telemetry","version":1,"uptime_ms":1500,"state":"IDLE","state_code":0,'
-    '"mode":"bench","motion_enabled":false,"estop_configured":true,"angles_deg":null,'
-    '"distance_mm":null,"current_ma":null,"gripper_percent":null,'
+    '"mode":"bench","motion_enabled":false,"estop_configured":true,'
+    '"angles_deg":{"ombro":145.0,"cotovelo":55.0,"punho_rot":63.0,"punho_flex":81.0,"garra":45.0},'
+    '"base_drive_ms":0,"distance_mm":null,"current_ma":null,"gripper_percent":null,'
     '"execution":{"backend":"disabled","axes_configured":0,"phase":"idle","fault":"none"},'
-    '"bench_servo":{"enabled":false,"channels":0},"stack_min_free_bytes":2048}'
+    '"bench_servo":{"enabled":true,"channels":5},"stack_min_free_bytes":2048}'
 )
+# Firmware antigo, ou servos de bancada desligados: sem ângulos.
+LINHA_SEM_ANGULOS = '{"type":"telemetry","version":1,"state":"IDLE","state_code":0,"angles_deg":null}'
 
 
 def test_interpretar_linha():
@@ -25,11 +29,26 @@ def test_interpretar_linha():
 
 
 def test_extrair_angulos():
-    assert extrair_angulos(interpretar_linha(LINHA_REAL)) is None               # null no firmware atual
+    tel = interpretar_linha(LINHA_REAL)
+    assert extrair_angulos(tel) == POSE_IDLE_SERVO                              # base sem calibração fica em 0
+    assert base_sem_calibracao(tel)
+    assert extrair_angulos(interpretar_linha(LINHA_SEM_ANGULOS)) is None
     assert extrair_angulos({"angles_deg": [1, 2, 3, 4, 5, 6]}) == [1, 2, 3, 4, 5, 6]
     nomes = dict(base=1, ombro=2, cotovelo=3, punho_rot=4, punho_flex=5, garra=6)
     assert extrair_angulos({"angles_deg": nomes}) == [1, 2, 3, 4, 5, 6]
     assert extrair_angulos({"angles_deg": [1, None, 3, 4, 5, 6]}) is None
+    assert extrair_angulos({"angles_deg": {"ombro": None, "garra": True}}) is None
+    parcial = extrair_angulos({"angles_deg": {"ombro": 100.0, "garra": None}})  # servo ainda não ligado
+    assert parcial[1] == 100 and parcial[5] == POSE_NEUTRA_SERVO[5]
+
+
+def test_calibracao():
+    assert np.allclose(servo_para_modelo(POSE_NEUTRA_SERVO), POSE_NEUTRA)     # neutro do servo = pose do STL
+    assert abs(POSE_NEUTRA_SERVO[1] - (1916 - 500) * 180 / 2000) < 1e-9       # ombro no pulso neutro do firmware
+    for ang in ([0, 90, 90, 90, 90, 90], [60, 55, 125, 90, 105, 150], [-45, 120, 70, 40, 130, 20]):
+        assert np.allclose(servo_para_modelo(modelo_para_servo(ang)), ang)
+    um_grau = servo_para_modelo([0, POSE_NEUTRA_SERVO[1] + 1] + POSE_NEUTRA_SERVO[2:])
+    assert abs(um_grau[1] - 91) < 1e-9                                         # 1 grau do servo = 1 grau no modelo
 
 
 class PortaFalsa:
@@ -79,7 +98,8 @@ def test_garra_abre_e_fecha():
 def test_simulador():
     for t in range(0, 40):
         tel = telemetria_em(t)
-        assert tel["type"] == "telemetry" and len(tel["angles_deg"]) == 6
+        assert tel["type"] == "telemetry" and len(extrair_angulos(tel)) == 6
+    assert np.allclose(servo_para_modelo(extrair_angulos(telemetria_em(0))), POSE_NEUTRA, atol=0.1)  # 1 casa decimal
 
 
 def test_quadros_batem_com_os_palitos():
@@ -106,7 +126,7 @@ def test_comandos():
     assert interpretar("punho rot 45")[0]["nome"] == "punho_rot"               # nome com espaço
     assert interpretar("rotação 45")[0]["nome"] == "punho_rot"                 # apelido com acento
     assert interpretar("base -30")[0]["graus"] == -30                          # a base aceita negativo
-    assert [a["tipo"] for a in interpretar("neutro; auto; ajuda")] == ["neutro", "auto", "ajuda"]
+    assert [a["tipo"] for a in interpretar("neutro; idle; auto; ajuda")] == ["neutro", "idle", "auto", "ajuda"]
     assert [a["nome"] for a in interpretar("base 10; ombro 100")] == ["base", "ombro"]
     for ruim in ("garra", "banana 10", "garra abc", "garra 181", "ombro -5", ""):
         assert interpretar(ruim)[0]["tipo"] in ("erro", "vazio"), ruim
@@ -122,6 +142,8 @@ def test_executar_no_gemeo():
     assert g.manual and g.angulos_alvo[5] == 150
     g.receber()                                    # dados do simulador não podem sobrescrever o manual
     assert g.angulos_alvo[5] == 150
+    g.executar("idle")
+    assert g.angulos_alvo == POSE_IDLE_SERVO
     g.executar("auto")
     assert not g.manual
 

@@ -12,15 +12,18 @@ JUNTAS = {
 }
 NOMES_BONITOS = ["base", "ombro", "cotovelo", "punho_rot", "punho_flex", "garra"]
 
-# Limites aceitos, em graus. Os servos de 180° vão de 0 a 180; a base (giro contínuo) é livre.
+# Limites aceitos, em graus do servo (a mesma unidade do terminal do firmware: "ombro 127").
+# Os servos de 180° vão de 0 a 180; a base (giro contínuo) é livre.
 LIMITE_BASE = (-180.0, 180.0)
 LIMITE_SERVO = (0.0, 180.0)
 
 AJUDA = (
-    "Comandos (vários com ;):\n"
+    "Comandos (vários com ;),\n"
+    "em graus do servo:\n"
     "  garra 150\n"
     "  base -30\n"
-    "  neutro   (pose neutra)\n"
+    "  neutro   (pose do STL)\n"
+    "  idle     (pose IDLE)\n"
     "  auto     (segue o ESP32)\n"
     "Juntas: base, ombro,\n"
     "  cotovelo, punho_rot,\n"
@@ -40,7 +43,7 @@ def interpretar(texto):
 
     Cada ação é um dicionário:
       {"tipo": "mover", "indice": 5, "nome": "garra", "graus": 150.0}
-      {"tipo": "neutro"} | {"tipo": "auto"} | {"tipo": "ajuda"}
+      {"tipo": "neutro"} | {"tipo": "idle"} | {"tipo": "auto"} | {"tipo": "ajuda"}
       {"tipo": "erro", "mensagem": "..."}
     """
     acoes = []
@@ -48,7 +51,7 @@ def interpretar(texto):
         pedaco = pedaco.strip()
         if not pedaco:
             continue
-        if pedaco in ("neutro", "auto", "ajuda"):
+        if pedaco in ("neutro", "idle", "auto", "ajuda"):
             acoes.append({"tipo": pedaco})
             continue
         partes = pedaco.split()

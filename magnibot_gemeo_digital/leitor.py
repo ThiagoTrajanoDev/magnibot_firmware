@@ -4,6 +4,7 @@ import math
 import time
 
 from braco import NOMES, POSE_NEUTRA
+from calibracao import POSE_NEUTRA_SERVO, base_em_graus, modelo_para_servo
 
 # Nomes dos estados, na ordem de state_code usada pelo firmware (docs/serial-protocol.md).
 ESTADOS = {
@@ -35,23 +36,46 @@ def interpretar_linha(linha):
     return dados
 
 
-def extrair_angulos(telemetria):
-    """Devolve a lista com os 6 ângulos, ou None se o firmware ainda não os envia.
+def _numero(valor):
+    return isinstance(valor, (int, float)) and not isinstance(valor, bool)
 
-    Hoje o firmware manda "angles_deg": null. Quando mandar valores, aceitamos
-    uma lista na ordem [base, ombro, cotovelo, punho_rot, punho_flex, garra]
-    ou um dicionário com esses nomes. (FORMATO A CONFIRMAR com quem faz o firmware.)
+
+def extrair_angulos(telemetria):
+    """Devolve [base, ombro, cotovelo, punho_rot, punho_flex, garra] em graus do servo, ou None.
+
+    O firmware manda os ângulos comandados (não medidos) num dicionário, sem a base:
+        "angles_deg": {"ombro": 145.0, "cotovelo": 55.0, ...}, "base_drive_ms": 0
+    Uma junta com null (servo ainda não ligado) fica na pose do STL. A base vem de "base"
+    (o simulador manda) ou de base_drive_ms, se a base estiver calibrada (calibracao.py); senão, 0.
+    Também aceita uma lista de 6 valores. Devolve None se não vier nenhum ângulo.
     """
     bruto = telemetria.get("angles_deg")
-    if isinstance(bruto, (list, tuple)) and len(bruto) >= 6:
-        valores = list(bruto[:6])
-    elif isinstance(bruto, dict) and all(nome in bruto for nome in NOMES):
-        valores = [bruto[nome] for nome in NOMES]
-    else:
+    if isinstance(bruto, (list, tuple)):
+        if len(bruto) < 6 or not all(_numero(v) for v in bruto[:6]):
+            return None
+        return [float(v) for v in bruto[:6]]
+    if not isinstance(bruto, dict):
         return None
-    if not all(isinstance(v, (int, float)) for v in valores):
+    angulos = list(POSE_NEUTRA_SERVO)
+    achou = False
+    for i, nome in enumerate(NOMES):
+        if _numero(bruto.get(nome)):
+            angulos[i] = float(bruto[nome])
+            achou = True
+    if not achou:
         return None
-    return [float(v) for v in valores]
+    if not _numero(bruto.get("base")):
+        base = base_em_graus(telemetria.get("base_drive_ms"))
+        angulos[0] = 0.0 if base is None else base
+    return angulos
+
+
+def base_sem_calibracao(telemetria):
+    """True quando o firmware mandou o giro da base em ms, mas não sabemos convertê-lo em graus."""
+    bruto = telemetria.get("angles_deg")
+    return (isinstance(bruto, dict) and not _numero(bruto.get("base"))
+            and _numero(telemetria.get("base_drive_ms"))
+            and base_em_graus(telemetria["base_drive_ms"]) is None)
 
 
 class LeitorSerial:
@@ -87,6 +111,8 @@ def abrir_serial(nome_da_porta):
 # ---------------------------------------------------------------------------
 # Simulador: finge ser o ESP32 para a equipe desenvolver sem o braço.
 # Cada etapa: (duração em s, state_code, ângulos iniciais, ângulos finais, distância inicial, final)
+# Os ângulos das etapas estão na convenção do modelo (90 = pose do STL); a telemetria
+# sai em graus do servo, como a do firmware.
 # ---------------------------------------------------------------------------
 _N = POSE_NEUTRA
 _ETAPAS = [
@@ -114,13 +140,14 @@ def telemetria_em(t):
     for duracao, codigo, ang_ini, ang_fim, dist_ini, dist_fim in _ETAPAS:
         if t <= duracao:
             fracao = t / duracao
-            angulos = [round(_misturar(a, b, fracao), 1) for a, b in zip(ang_ini, ang_fim)]
+            modelo = [_misturar(a, b, fracao) for a, b in zip(ang_ini, ang_fim)]
+            servo = [round(v, 1) for v in modelo_para_servo(modelo)]
             distancia = None if dist_ini is None else round(_misturar(dist_ini, dist_fim, fracao))
             return {
                 "type": "telemetry", "version": 1, "uptime_ms": int(t * 1000),
                 "state": ESTADOS[codigo], "state_code": codigo, "mode": "simulador",
                 "motion_enabled": codigo != 0,
-                "angles_deg": angulos, "distance_mm": distancia,
+                "angles_deg": dict(zip(NOMES, servo)), "distance_mm": distancia,
                 "current_ma": None, "gripper_percent": None,
             }
         t -= duracao

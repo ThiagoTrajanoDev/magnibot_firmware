@@ -45,14 +45,16 @@ python test_gemeo.py
 ## Mexer no modelo com comandos
 
 Dentro da janela, clique na caixa **Comando**, escreva e aperte Enter. Os comandos mexem **só no modelo 3D**
-(não são enviados ao braço de verdade).
+(não são enviados ao braço de verdade). Os ângulos são **graus do servo**, a mesma unidade do terminal do
+firmware: `ombro 145` no gêmeo e no ESP32 querem dizer a mesma posição.
 
 | Digite | O que acontece |
 |---|---|
 | `garra 150` | move a garra para 150° |
 | `base -30` | gira a base para -30° |
 | `ombro 130; cotovelo 70` | vários comandos de uma vez, separados por `;` |
-| `neutro` | volta à posição neutra |
+| `neutro` | pose em que o STL foi montado |
+| `idle` | pose IDLE do firmware |
 | `auto` | volta a seguir o ESP32 (ou o simulador) |
 | `ajuda` | mostra a lista de comandos |
 
@@ -76,15 +78,18 @@ Para gerar uma figura com comandos (relatório): `python gemeo.py --simular --im
 | `comandos.py` | Entende o que você digita (`garra 150`) |
 | `modelo.py` | Desenho do braço com caixas e cilindros (cores do modelo do GrabCAD) |
 | `leitor.py` | Lê a porta serial e filtra a telemetria; também tem o simulador |
+| `calibracao.py` | Converte os graus do servo (firmware) nos ângulos do modelo 3D |
 | `test_gemeo.py` | Testes automáticos |
 
 ## O que ainda precisa ser decidido ou medido
 
-1. **Ângulos no firmware.** Hoje a telemetria traz `"angles_deg": null`. Enquanto for `null`, o gêmeo
-   mostra o braço na posição neutra e avisa isso na tela. Falta combinar com quem faz o firmware o
-   formato quando houver valores. O programa já aceita uma lista
-   `[base, ombro, cotovelo, punho_rot, punho_flex, garra]` ou um dicionário com esses nomes (`extrair_angulos`, em `leitor.py`).
-   Esses ângulos serão os **comandados**, não os medidos.
+1. **Calibração (`calibracao.py`).** O firmware manda na telemetria os ângulos **comandados** (não medidos),
+   em graus do servo: `"angles_deg": {"ombro": 145.0, ...}` (10 vezes por segundo enquanto algo se mexe; 2 parado).
+   Para cada junta, `neutro` é o grau do servo em que a peça fica igual ao STL e `sinal` diz o sentido. Os valores
+   iniciais vêm do pulso neutro do firmware (`joint_pwm`, em `bench_servo.c`) e **precisam ser conferidos no braço**:
+   mande o mesmo comando ao ESP32 e ao gêmeo e compare.
+   A **base** não tem encoder: o firmware só manda `base_drive_ms` (tempo de giro). Meça quantos graus ela gira
+   por segundo e coloque em `BASE_GRAUS_POR_S`; até lá ela fica em 0°.
 2. **Medidas do braço.** Os comprimentos no topo de `braco.py` são provisórios. Troque pelas medidas do modelo do GrabCAD.
 3. **Sentido dos ângulos.** Foi assumido: base em graus a partir do "grau 0"; nos servos de 180°, o valor 90 deixa a
    peça alinhada com a anterior (braço em pé) e valores maiores inclinam para a frente. Se algum servo for

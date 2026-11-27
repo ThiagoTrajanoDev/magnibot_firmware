@@ -17,11 +17,12 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import TextBox
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-from braco import POSE_NEUTRA, calcular_pose
+from braco import calcular_pose
+from calibracao import POSE_IDLE_SERVO, POSE_NEUTRA_SERVO, servo_para_modelo
 from comandos import AJUDA, interpretar
 from modelo_stl import ModeloBraco
 #from modelo import ModeloBraco
-from leitor import ESTADOS, Simulador, abrir_serial, extrair_angulos, telemetria_em
+from leitor import ESTADOS, Simulador, abrir_serial, base_sem_calibracao, extrair_angulos, telemetria_em
 
 # Cor de cada estado (as mesmas cores planejadas para o LED da placa).
 CORES = {0: "#2ecc71", 1: "#3b82f6", 2: "#d4a90a", 3: "#c026d3", 4: "#ef4444"}
@@ -35,13 +36,15 @@ class Gemeo:
         self.mostrar_pivos = pivos              # True: desenha pontos nos pivos das pecas
         self.modelo = ModeloBraco()
         self.fonte = fonte                      # LeitorSerial ou Simulador
-        self.angulos_alvo = list(POSE_NEUTRA)   # último ângulo recebido
-        self.angulos_desenho = list(POSE_NEUTRA)  # ângulo que está desenhado agora (suavizado)
+        # Todos os ângulos guardados aqui estão em graus do servo (a unidade do firmware);
+        # a conversão para o modelo 3D (calibracao.py) acontece só na hora de desenhar.
+        self.angulos_alvo = list(POSE_NEUTRA_SERVO)     # último ângulo recebido
+        self.angulos_desenho = list(POSE_NEUTRA_SERVO)  # ângulo que está desenhado agora (suavizado)
         self.telemetria = None                  # última telemetria recebida
         self.tem_angulos = False
         self.ultima_msg = None                  # horário da última telemetria
         self.manual = False                     # True: o modelo obedece aos comandos digitados
-        self.angulos_manual = list(POSE_NEUTRA)  # ângulos pedidos pelos comandos
+        self.angulos_manual = list(POSE_NEUTRA_SERVO)  # ângulos pedidos pelos comandos
         self.resposta = ""                      # última resposta aos comandos digitados
 
         self._montar_janela()
@@ -106,7 +109,7 @@ class Gemeo:
             angulos = extrair_angulos(tel)
             self.tem_angulos = angulos is not None
             if not self.manual:                 # no modo manual, os ângulos vêm dos comandos
-                self.angulos_alvo = angulos if angulos is not None else list(POSE_NEUTRA)
+                self.angulos_alvo = angulos if angulos is not None else list(POSE_NEUTRA_SERVO)
 
     # --------------------------------------------------------------- comandos
     def _enviou(self, texto):
@@ -129,8 +132,12 @@ class Gemeo:
                 respostas.append(f"ok: {acao['nome']} = {acao['graus']:g}°")
             elif tipo == "neutro":
                 self.manual = True
-                self.angulos_manual = list(POSE_NEUTRA)
-                respostas.append("ok: posição neutra")
+                self.angulos_manual = list(POSE_NEUTRA_SERVO)
+                respostas.append("ok: posição neutra (pose do STL)")
+            elif tipo == "idle":
+                self.manual = True
+                self.angulos_manual = list(POSE_IDLE_SERVO)
+                respostas.append("ok: pose IDLE do firmware")
             elif tipo == "auto":
                 self.manual = False
                 respostas.append("ok: seguindo o ESP32/simulador")
@@ -144,7 +151,7 @@ class Gemeo:
         return self.resposta
 
     def suavizar(self):
-        """Aproxima o desenho do alvo aos poucos (a telemetria real chega só 2 vezes por segundo)."""
+        """Aproxima o desenho do alvo aos poucos (a telemetria chega de 2 a 10 vezes por segundo)."""
         self.angulos_desenho = [
             atual + (alvo - atual) * SUAVIZACAO
             for atual, alvo in zip(self.angulos_desenho, self.angulos_alvo)
@@ -152,15 +159,16 @@ class Gemeo:
 
     # ---------------------------------------------------------------- desenho
     def desenhar(self):
-        poligonos, cores = self.modelo.poligonos(self.angulos_desenho)
+        angulos_modelo = servo_para_modelo(self.angulos_desenho)
+        poligonos, cores = self.modelo.poligonos(angulos_modelo)
         self.colecao.set_verts(poligonos)
         self.colecao.set_facecolor(cores)
 
         if self.mostrar_pivos:
-            _, pontos = self.modelo.pontos_juntas(self.angulos_desenho)
+            _, pontos = self.modelo.pontos_juntas(angulos_modelo)
             self.pontos_pivos._offsets3d = (pontos[:, 0], pontos[:, 1], pontos[:, 2])
 
-        pose = calcular_pose(self.angulos_desenho)
+        pose = calcular_pose(angulos_modelo)
         corpo = pose["corpo"]
         self.linha_corpo.set_data_3d(corpo[:, 0], corpo[:, 1], corpo[:, 2])
         for linha, (ini, fim) in ((self.linha_dedo_a, pose["dedos"][0]), (self.linha_dedo_b, pose["dedos"][1])):
@@ -189,14 +197,17 @@ class Gemeo:
         self.txt_estado.set_color(CORES.get(codigo, "#566574"))
         distancia = tel.get("distance_mm")
         nomes = ["base", "ombro", "cotovelo", "punho rot", "punho flex", "garra"]
-        linhas = [f"distância: {'--' if distancia is None else str(distancia) + ' mm'}", ""]
+        linhas = [f"distância: {'--' if distancia is None else str(distancia) + ' mm'}", "",
+                  "graus do servo:"]
         linhas += [f"{n:<10}{v:6.1f}°" for n, v in zip(nomes, self.angulos_alvo)]
         self.txt_info.set_text("\n".join(linhas))
         avisos = []
         if self.manual:
             avisos.append("MODO MANUAL: o modelo obedece aos seus comandos.\nDigite 'auto' para voltar aos dados do ESP32.")
         elif not self.tem_angulos:
-            avisos.append("O firmware ainda envia angles_deg = null.\nBraço mostrado na posição neutra.")
+            avisos.append("A telemetria veio sem ângulos (angles_deg).\nBraço mostrado na posição neutra.")
+        elif base_sem_calibracao(tel):
+            avisos.append("Base sem calibração: desenhada em 0°.\nVer BASE_GRAUS_POR_S em calibracao.py.")
         if self.ultima_msg is not None and time.time() - self.ultima_msg > 2:
             avisos.append("Sem dados há mais de 2 s. Cabo ou firmware?")
         self.txt_aviso.set_text("\n\n".join(avisos))
@@ -227,7 +238,7 @@ def main():
         gemeo.ultima_msg = time.time()
         angulos = extrair_angulos(tel)
         gemeo.tem_angulos = angulos is not None
-        gemeo.angulos_alvo = gemeo.angulos_desenho = angulos or list(POSE_NEUTRA)
+        gemeo.angulos_alvo = gemeo.angulos_desenho = angulos or list(POSE_NEUTRA_SERVO)
         for comando in args.comando or []:
             print(comando, "->", gemeo.executar(comando))
             gemeo.angulos_desenho = list(gemeo.angulos_alvo)
