@@ -4,7 +4,11 @@ Programa de computador que desenha o braço em 3D e mostra o estado, a distânci
 ângulos, usando a telemetria que o ESP32-S3 já envia pela USB
 (protocolo MB1, em `magnibot_agent_configurations/docs/serial-protocol.md`).
 
-Este programa **só lê**: não manda nenhum comando ao braço.
+No modo real, os botões **Start** e **Emergência** enviam os comandos MB1
+`start` e `estop`. A interface mostra se o ESP32 aceitou, recusou ou deixou
+o pedido sem confirmação. O estado exibido vem da telemetria. Em estado
+`ERRO`, o estado aparece em vermelho e o painel exibe a causa da falha de busca ou pega
+quando o firmware a informa.
 
 ## Instalar (uma vez)
 

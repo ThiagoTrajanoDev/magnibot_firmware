@@ -16,12 +16,8 @@ ESTADOS = {
 }
 
 
-def interpretar_linha(linha):
-    """Lê uma linha de texto da serial. Devolve a telemetria (dicionário) ou None.
-
-    O ESP32 mistura mensagens de boot e logs com os JSONs, então ignoramos
-    tudo que não for um objeto JSON com type=telemetry e version=1.
-    """
+def _mensagem_v1(linha):
+    """Decodifica JSON v1, ignorando os logs que compartilham o console."""
     linha = linha.strip()
     if not linha.startswith("{"):          # log comum do ESP-IDF, não é JSON
         return None
@@ -31,9 +27,21 @@ def interpretar_linha(linha):
         return None
     if not isinstance(dados, dict):
         return None
-    if dados.get("type") != "telemetry" or dados.get("version") != 1:
+    if dados.get("version") != 1:
         return None
     return dados
+
+
+def interpretar_linha(linha):
+    """Lê uma linha de texto da serial. Devolve a telemetria (dicionário) ou None.
+
+    O ESP32 mistura mensagens de boot e logs com os JSONs, então ignoramos
+    tudo que não for um objeto JSON com type=telemetry e version=1.
+    """
+    dados = _mensagem_v1(linha)
+    if dados is not None and dados.get("type") == "telemetry":
+        return dados
+    return None
 
 
 def _numero(valor):
@@ -84,6 +92,21 @@ class LeitorSerial:
     def __init__(self, porta_serial):
         self.porta = porta_serial   # objeto da biblioteca pyserial (ou um falso, nos testes)
         self.sobra = ""             # pedaço de linha que ainda não terminou
+        self.respostas = []
+        self.proximo_id = 1
+        self.sincronizada = False
+
+    def enviar(self, comando):
+        """Envia um comando MB1 e devolve o ID que virá na resposta."""
+        identificador = self.proximo_id
+        self.proximo_id = (identificador + 1) % (2 ** 32)
+        prefixo = "" if self.sincronizada else "\n"
+        quadro = f"{prefixo}MB1 {identificador} {comando}\n".encode("ascii")
+        self.sincronizada = False
+        if self.porta.write(quadro) != len(quadro):
+            raise OSError("escrita serial incompleta")
+        self.sincronizada = True
+        return identificador
 
     def ler(self):
         """Devolve a lista de telemetrias que chegaram desde a última chamada."""
@@ -91,10 +114,15 @@ class LeitorSerial:
         self.sobra += chegou.decode("utf-8", errors="ignore")
         *linhas, self.sobra = self.sobra.split("\n")           # a última parte pode estar incompleta
         resultado = []
+        self.respostas.clear()
         for linha in linhas:
-            telemetria = interpretar_linha(linha)
-            if telemetria is not None:
-                resultado.append(telemetria)
+            mensagem = _mensagem_v1(linha)
+            if mensagem is None:
+                continue
+            if mensagem.get("type") == "telemetry":
+                resultado.append(mensagem)
+            elif mensagem.get("type") == "response":
+                self.respostas.append(mensagem)
         return resultado
 
     def fechar(self):
@@ -105,7 +133,7 @@ def abrir_serial(nome_da_porta):
     """Abre a porta de verdade. A biblioteca só é carregada aqui, para o modo --simular não exigir pyserial."""
     import serial
     # timeout=0: ler() nunca espera; 115200 é a velocidade combinada no protocolo.
-    return LeitorSerial(serial.Serial(nome_da_porta, 115200, timeout=0))
+    return LeitorSerial(serial.Serial(nome_da_porta, 115200, timeout=0, write_timeout=0.2))
 
 
 # ---------------------------------------------------------------------------
