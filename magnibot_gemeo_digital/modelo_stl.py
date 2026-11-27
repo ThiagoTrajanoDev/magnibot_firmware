@@ -48,17 +48,22 @@ PECAS = [
 
 
 # ---------------------------------------------------------------------------
-# Pivôs, eixos e sinais das juntas (espaço STL, Y = cima, mm).
-# Se algum movimento ficar torto, ajuste o pivô/eixo/sinal daquela junta e teste com --simular.
+# Pivôs, eixos e sinais das juntas (espaço STL, Y = cima, mm), todos na POSE NEUTRA.
+# Os pivôs são os centros dos cubos arredondados nas pontas das peças (medidos nos STLs
+# já montados). Os braços ficam centrados em x ~ -11 e z ~ -13, não na origem.
+# Para ombro, cotovelo e punho_flex (eixo X) o x do pivô não importa; para punho_rot (eixo Y)
+# o pivô tem de estar sobre a linha central do Arm 02/Arm 03.
+# Se algum movimento ficar torto, ajuste o pivô/eixo/sinal daquela junta e teste com --simular --pivos.
 # ---------------------------------------------------------------------------
 JUNTAS = {
-    "base":       {"pivo": (0.0,   0.0, 0.0), "eixo": (0, 1, 0), "sinal": +1},  # yaw vertical
-    "ombro":      {"pivo": (0.0,  110.0, 0.0), "eixo": (1, 0, 0), "sinal": -1},  # inclinação para frente
-    "cotovelo":   {"pivo": (100.0, 230.0, 0.0), "eixo": (1, 0, 0), "sinal": -1},
-    "punho_flex": {"pivo": (0.0, 370.0, 0.0), "eixo": (1, 0, 0), "sinal": -1},
-    "punho_rot":  {"pivo": (0.0, 308.0, 0.0), "eixo": (0, 1, 0), "sinal": -1},  # gira em volta do braço
+    "base":       {"pivo": (0.0,     0.0,   0.0), "eixo": (0, 1, 0), "sinal": +1},  # yaw vertical
+    "ombro":      {"pivo": (0.0,    85.0, -11.0), "eixo": (1, 0, 0), "sinal": -1},  # cubo de baixo do Arm 01
+    "cotovelo":   {"pivo": (0.0,   222.0, -14.0), "eixo": (1, 0, 0), "sinal": -1},  # cubo de cima do Arm 01
+    "punho_rot":  {"pivo": (-11.0, 308.0, -13.5), "eixo": (0, 1, 0), "sinal": -1},  # linha central do Arm 02/03
+    "punho_flex": {"pivo": (0.0,   331.0, -13.4), "eixo": (1, 0, 0), "sinal": -1},  # ressalto do Gripper base
 }
-ORDEM = ["base", "ombro", "cotovelo", "punho_flex", "punho_rot"]
+# Cadeia física, da raiz para a ponta: o Arm 03 é movido pelo punho_rot, e a garra pelo punho_flex.
+ORDEM = ["base", "ombro", "cotovelo", "punho_rot", "punho_flex"]
 
 # Gripper abre/fecha deslizando em X_stl (rotacionado pelas juntas ativas).
 GARRA_PECAS = {
@@ -95,20 +100,6 @@ def _rotacionar(vertices, pivo, eixo, angulo_graus):
     return (R @ hom.T).T[:, :3]
 
 
-def _rotacionar_ponto(ponto, pivo, eixo, angulo_graus):
-    return _rotacionar(np.asarray(ponto, dtype=float).reshape(1, 3),
-                       pivo, eixo, angulo_graus)[0]
-
-
-def _rotacionar_vetor(vetor, eixo, angulo_graus):
-    if abs(angulo_graus) < 1e-9:
-        return vetor
-    R = trimesh.transformations.rotation_matrix(
-        np.radians(angulo_graus), np.asarray(eixo, dtype=float)
-    )
-    return R[:3, :3] @ vetor
-
-
 class ModeloBraco:
     def __init__(self):
         self._cache = {}          
@@ -139,85 +130,70 @@ class ModeloBraco:
         T_g = trimesh.transformations.translation_matrix(posicao)
         mesh.apply_transform(T_g @ T_c @ R @ T_o)
 
-    def _pivos_em_stl(self, deltas):
-        """Pivôs de cada junta, acumulando as rotações anteriores (espaço STL, Y-up)."""
-        pivos = {j: np.array(JUNTAS[j]["pivo"], dtype=float) for j in ORDEM}
-        for i, j in enumerate(ORDEM):
-            ang = JUNTAS[j]["sinal"] * deltas[j]
-            if abs(ang) < 1e-9:
-                continue
-            eixo = JUNTAS[j]["eixo"]
-            for j2 in ORDEM[i + 1:]:
-                pivos[j2] = _rotacionar_ponto(pivos[j2], pivos[j], eixo, ang)
-        return pivos
+    @staticmethod
+    def _deltas(angulos):
+        """Quanto cada junta saiu da pose neutra, em graus do modelo."""
+        return {j: angulos[i] - POSE_NEUTRA[i] for i, j in enumerate(
+            ["base", "ombro", "cotovelo", "punho_rot", "punho_flex"])}
+
+    @staticmethod
+    def _matrizes(deltas):
+        """Rotação 4x4 de cada junta, com o pivô e o eixo da POSE NEUTRA."""
+        return {
+            j: trimesh.transformations.rotation_matrix(
+                np.radians(JUNTAS[j]["sinal"] * deltas[j]),
+                np.asarray(JUNTAS[j]["eixo"], dtype=float), point=JUNTAS[j]["pivo"])
+            for j in ORDEM
+        }
+
+    @staticmethod
+    def _cadeia(matrizes, juntas):
+        """Composição da raiz para a ponta: T = T_base @ T_ombro @ ...
+
+        Aplicada a um ponto da pose neutra, a junta mais da ponta age primeiro e cada junta
+        anterior leva junto as seguintes (pivôs e eixos), como num braço de verdade.
+        """
+        T = np.eye(4)
+        for j in ORDEM:
+            if j in juntas:
+                T = T @ matrizes[j]
+        return T
 
     def pontos_juntas(self, angulos):
         """Para debug. Devolve (nomes, pontos 3D) dos pivôs das juntas, no referencial do matplotlib.
         Desenhar um ponto em cada pivô para visualizar a localização exata no modelo.
         """
-        deltas = {
-            "base":       angulos[0] - POSE_NEUTRA[0],
-            "ombro":      angulos[1] - POSE_NEUTRA[1],
-            "cotovelo":   angulos[2] - POSE_NEUTRA[2],
-            "punho_rot":  angulos[3] - POSE_NEUTRA[3],
-            "punho_flex": angulos[4] - POSE_NEUTRA[4],
-        }
-        pivos = self._pivos_em_stl(deltas)
+        matrizes = self._matrizes(self._deltas(angulos))
         M = _matriz_mundo()
-        M3, t = M[:3, :3], M[:3, 3]
-        nomes = list(ORDEM)
-        pontos = np.array([M3 @ pivos[j] + t for j in nomes])
-        return nomes, pontos
+        pontos = []
+        for i, j in enumerate(ORDEM):
+            T = M @ self._cadeia(matrizes, ORDEM[:i])          # só as juntas antes desta movem o pivô
+            pontos.append((T @ np.append(JUNTAS[j]["pivo"], 1.0))[:3])
+        return list(ORDEM), np.array(pontos)
 
     # ------------------------------------------------------------------ API
     def poligonos(self, angulos):
         """Devolve (lista de triângulos 3D, lista de cores RGBA)."""
-        deltas = {
-            "base":       angulos[0] - POSE_NEUTRA[0],
-            "ombro":      angulos[1] - POSE_NEUTRA[1],
-            "cotovelo":   angulos[2] - POSE_NEUTRA[2],
-            "punho_rot":  angulos[3] - POSE_NEUTRA[3],
-            "punho_flex": angulos[4] - POSE_NEUTRA[4],
-        }
+        matrizes = self._matrizes(self._deltas(angulos))
         delta_garra = angulos[5] - POSE_NEUTRA[5]
-
-        pivos = self._pivos_em_stl(deltas) 
 
         polis, cores = [], []
         for nome, v_ref, faces, cor, juntas_peca in self._pecas:
-            vertices = v_ref.copy()
+            vertices = v_ref
 
-            # Rotação das juntas que afetam esta peça
-            for j in ORDEM:
-                if j not in juntas_peca:
-                    continue
-                ang = JUNTAS[j]["sinal"] * deltas[j]
-                if abs(ang) < 1e-9:
-                    continue
-                vertices = _rotacionar(vertices, pivos[j], JUNTAS[j]["eixo"], ang)
-
-            # Direção de abertura (X_stl rotacionado pelas juntas desta peça)
-            eixo_x = np.array([1.0, 0.0, 0.0])
-            eixo_y = np.array([0.0, 1.0, 0.0])
-            for j in ORDEM:
-                if j not in juntas_peca:
-                    continue
-                ang = JUNTAS[j]["sinal"] * deltas[j]
-                if abs(ang) < 1e-9:
-                    continue
-                eixo_x = _rotacionar_vetor(eixo_x, JUNTAS[j]["eixo"], ang)
-                eixo_y = _rotacionar_vetor(eixo_y, JUNTAS[j]["eixo"], ang)
-
-            # Gripper abre/fecha
+            # Garra abre/fecha deslizando em X, ainda na pose neutra.
             if nome in GARRA_PECAS and abs(delta_garra) > 1e-6:
                 desloc = GARRA_PECAS[nome] * delta_garra * ABERTURA_POR_GRAU
-                vertices = vertices + desloc * eixo_x
+                vertices = vertices + desloc * np.array([1.0, 0.0, 0.0])
 
-            # Engrenagem gira com a garra
+            # Engrenagem gira com a garra, em volta do próprio centro (eixo Y da pose neutra).
             if nome in GEAR_ROTACAO and abs(delta_garra) > 1e-6:
                 ang_gear = delta_garra * GEAR_ROTACAO[nome]
-                centro = vertices.mean(axis=0)
-                vertices = _rotacionar(vertices, centro, eixo_y, ang_gear)
+                vertices = _rotacionar(vertices, vertices.mean(axis=0), (0, 1, 0), ang_gear)
+
+            # Juntas que movem esta peça, da ponta para a raiz.
+            T = self._cadeia(matrizes, juntas_peca)
+            vertices = vertices @ T[:3, :3].T + T[:3, 3]
 
             rgba = tuple(c / 255.0 for c in cor)
             for f in faces:
