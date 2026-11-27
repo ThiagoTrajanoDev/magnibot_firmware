@@ -1,3 +1,5 @@
 pyserial
 matplotlib
 numpy
+trimesh
+fast_simplification
