@@ -65,17 +65,21 @@ JUNTAS = {
 # Cadeia física, da raiz para a ponta: o Arm 03 é movido pelo punho_rot, e a garra pelo punho_flex.
 ORDEM = ["base", "ombro", "cotovelo", "punho_rot", "punho_flex"]
 
-# Gripper abre/fecha deslizando em X_stl (rotacionado pelas juntas ativas).
-GARRA_PECAS = {
-    "Gripper Direito":  +1,
-    "Gripper Esquerdo": -1,
-}
-ABERTURA_POR_GRAU = 50.0 / 180.0   # 50 mm de curso total
-
 GIRO_Z = -90 # rotacao do modelo em stl para conformidade com matplotlib
 
-# Ajustar ao simular
-GEAR_ROTACAO = {"Gear 1": -1.0, "Gear 2": +1.0}   # graus dos gears por grau de garra
+# Centros XY dos furos nos STLs montados, em mm. Cada lado tem um
+# mecanismo de quatro barras: base, engrenagem, dedo e grip link.
+# Os links superior e inferior compartilham os mesmos eixos XY.
+LADOS_GARRA = (
+    ("Direito", "Gear 1", +1, (14.40, 374.14), (32.04, 399.33), (6.40, 394.50),
+     ((32.69, 399.37), (24.45, 419.77)), ((6.61, 394.30), (24.39, 419.70))),
+    ("Esquerdo", "Gear 2", -1, (-12.55, 374.30), (-30.83, 399.01), (-3.60, 394.50),
+     ((-30.22, 399.58), (-21.27, 419.67)), ((-3.61, 394.30), (-21.39, 419.70))),
+)
+DISTANCIA_FUROS_DEDO = 22.0
+DISTANCIA_FUROS_LINK = 31.0
+# Curso visual conservador em torno da montagem de referência (garra a 90°).
+CURSO_ENGRENAGEM = 80.0
 
 def _matriz_mundo():
     """Y-up (STL) -> Z-up (matplotlib), com giro extra em Z."""
@@ -90,14 +94,43 @@ def _localizar(nome):
     return achados[0]
 
 
-def _rotacionar(vertices, pivo, eixo, angulo_graus):
-    if abs(angulo_graus) < 1e-9:
-        return vertices
-    R = trimesh.transformations.rotation_matrix(
-        np.radians(angulo_graus), np.asarray(eixo, dtype=float), point=pivo
-    )
-    hom = np.hstack([vertices, np.ones((len(vertices), 1))])
-    return (R @ hom.T).T[:, :3]
+def _alinhar_furos(furos, inicio, fim):
+    """Move uma peça rígida no plano XY, alinhando seus dois furos."""
+    origem, segundo = np.asarray(furos)
+    antes = segundo - origem
+    depois = fim - inicio
+    angulo = np.arctan2(depois[1], depois[0]) - np.arctan2(antes[1], antes[0])
+    matriz = trimesh.transformations.rotation_matrix(angulo, (0, 0, 1))
+    matriz[:2, 3] = inicio - matriz[:2, :2] @ origem
+    return matriz
+
+
+def _matrizes_garra(graus):
+    matrizes = {}
+    delta = (np.clip(graus, 0, 180) - POSE_NEUTRA[5]) * CURSO_ENGRENAGEM / 180
+    for lado, gear, sinal, pivo, pino, apoio, furos_dedo, furos_link in LADOS_GARRA:
+        giro = trimesh.transformations.rotation_matrix(
+            np.radians(-sinal * delta), (0, 0, 1), point=(*pivo, 0)
+        )
+        pino_movel = giro[:2, :2] @ pino + giro[:2, 3]
+        apoio_fixo = np.asarray(apoio)
+
+        # O pino comum do dedo e do link é a interseção dos círculos
+        # centrados no pino móvel da engrenagem e no apoio fixo do link.
+        entre_centros = apoio_fixo - pino_movel
+        distancia = np.linalg.norm(entre_centros)
+        direcao = entre_centros / distancia
+        perpendicular = np.array([-direcao[1], direcao[0]])
+        projecao = (DISTANCIA_FUROS_DEDO**2 - DISTANCIA_FUROS_LINK**2 + distancia**2) / (2 * distancia)
+        altura = np.sqrt(DISTANCIA_FUROS_DEDO**2 - projecao**2)
+        articulacao = pino_movel + projecao * direcao - sinal * altura * perpendicular
+
+        matrizes[gear] = giro
+        matrizes[f"Gripper {lado}"] = _alinhar_furos(furos_dedo, pino_movel, articulacao)
+        link = _alinhar_furos(furos_link, apoio_fixo, articulacao)
+        matrizes[f"Grip Link {lado}"] = link
+        matrizes[f"Grip Link {lado} Baixo"] = link
+    return matrizes
 
 
 class ModeloBraco:
@@ -175,25 +208,15 @@ class ModeloBraco:
     def poligonos(self, angulos):
         """Devolve (lista de triângulos 3D, lista de cores RGBA)."""
         matrizes = self._matrizes(self._deltas(angulos))
-        delta_garra = angulos[5] - POSE_NEUTRA[5]
+        garra = _matrizes_garra(angulos[5])
 
         polis, cores = [], []
         for nome, v_ref, faces, cor, juntas_peca in self._pecas:
-            vertices = v_ref
-
-            # Garra abre/fecha deslizando em X, ainda na pose neutra.
-            if nome in GARRA_PECAS and abs(delta_garra) > 1e-6:
-                desloc = GARRA_PECAS[nome] * delta_garra * ABERTURA_POR_GRAU
-                vertices = vertices + desloc * np.array([1.0, 0.0, 0.0])
-
-            # Engrenagem gira com a garra, em volta do próprio centro (eixo Y da pose neutra).
-            if nome in GEAR_ROTACAO and abs(delta_garra) > 1e-6:
-                ang_gear = delta_garra * GEAR_ROTACAO[nome]
-                vertices = _rotacionar(vertices, vertices.mean(axis=0), (0, 1, 0), ang_gear)
-
             # Juntas que movem esta peça, da ponta para a raiz.
             T = self._cadeia(matrizes, juntas_peca)
-            vertices = vertices @ T[:3, :3].T + T[:3, 3]
+            if nome in garra:
+                T = T @ garra[nome]
+            vertices = v_ref @ T[:3, :3].T + T[:3, 3]
 
             rgba = tuple(c / 255.0 for c in cor)
             for f in faces:
