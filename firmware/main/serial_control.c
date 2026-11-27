@@ -6,6 +6,10 @@
 #include "driver/usb_serial_jtag_vfs.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
+#if CONFIG_MAGNIBOT_UART_COMMANDS
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 
@@ -30,10 +34,12 @@ static void increment(uint32_t *value) {
 }
 
 esp_err_t serial_control_init(bench_servo_t *servos) {
-#if !CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG && !CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-    return ESP_ERR_NOT_SUPPORTED;
-#else
     if (initialized) return ESP_OK;
+#if CONFIG_MAGNIBOT_UART_COMMANDS
+    esp_err_t err = uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM, 2048, 0, 0, NULL, 0);
+    if (err != ESP_OK) return err;
+    uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
+#elif CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG || CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     if (!usb_serial_jtag_is_driver_installed()) {
         usb_serial_jtag_driver_config_t config = {
             .rx_buffer_size = 2048, .tx_buffer_size = 2048
@@ -42,20 +48,32 @@ esp_err_t serial_control_init(bench_servo_t *servos) {
         if (err != ESP_OK) return err;
     }
     usb_serial_jtag_vfs_use_driver();
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
     serial_parser_init(&parser);
     bench_servos = servos;
     initialized = true;
     return ESP_OK;
-#endif
 }
 
 static void accept_message(const protocol_message_t *message, robot_state_t *state) {
     command_result_t result = COMMAND_INVALID;
+    float reference = message->servo_degrees;
+    if (message->error == PROTOCOL_OK && message->named_servo &&
+        !bench_servo_named_reference(message->servo_gpio, message->servo_degrees, &reference))
+        return;
     increment(&rx_messages);
     if (message->error == PROTOCOL_OK) {
         result = message->command == COMMAND_SERVO
-            ? command_control_servo(state, bench_servos, message->servo_gpio, message->servo_degrees)
+            ? command_control_servo(state, bench_servos, message->servo_gpio, reference)
             : command_control_execute(state, message->command);
+        if ((message->command == COMMAND_START || message->command == COMMAND_IDLE_POSE) &&
+            *state == ROBOT_IDLE && bench_servo_enabled(bench_servos)) {
+            bool accepted = message->command == COMMAND_IDLE_POSE
+                ? bench_servo_idle_pose(bench_servos) : bench_servo_prepare_scan(bench_servos);
+            result = accepted ? COMMAND_ACCEPTED : COMMAND_POSE_NOT_READY;
+        }
     } else {
         increment(&protocol_errors);
     }
@@ -83,7 +101,7 @@ static void send_response(const response_t *response) {
     if (message->error == PROTOCOL_OK && message->command == COMMAND_DIAGNOSTIC) {
         robot_runtime_status_t runtime = robot_runtime_status(esp_timer_get_time() / 1000);
         int written = snprintf(diagnostic, sizeof(diagnostic),
-                 ",\"diagnostic\":{\"transport\":\"usb_serial_jtag\","
+                 ",\"diagnostic\":{\"transport\":\"%s\","
                  "\"max_line_bytes\":%d,\"frame_timeout_ms\":%d,"
                  "\"rx_messages\":%" PRIu32 ",\"protocol_errors\":%" PRIu32
                  ",\"dropped_responses\":%" PRIu32 ",\"estop_configured\":%s,"
@@ -92,6 +110,11 @@ static void send_response(const response_t *response) {
                  "\"distance_status\":\"%s\",\"current_status\":\"%s\","
                  "\"distance_io\":\"%s\",\"current_io\":\"%s\",\"actuator_io\":\"%s\","
                  "\"bench_servo\":{\"enabled\":%s,\"channels\":%u}}",
+#if CONFIG_MAGNIBOT_UART_COMMANDS
+                 "uart",
+#else
+                 "usb_serial_jtag",
+#endif
                  SERIAL_LINE_MAX, SERIAL_FRAME_TIMEOUT_MS, rx_messages,
                  protocol_errors, dropped_responses,
                  CONFIG_MAGNIBOT_ESTOP_GPIO >= 0 ? "true" : "false",
@@ -123,7 +146,11 @@ void serial_control_poll(robot_state_t *state) {
     protocol_message_t message;
     int64_t now = esp_timer_get_time() / 1000;
     if (serial_parser_expire(&parser, now, &message)) accept_message(&message, state);
+#if CONFIG_MAGNIBOT_UART_COMMANDS
+    int received = uart_read_bytes(CONFIG_ESP_CONSOLE_UART_NUM, data, sizeof(data), 0);
+#else
     int received = usb_serial_jtag_read_bytes(data, sizeof(data), 0);
+#endif
     for (int i = 0; i < received; ++i) {
         if (serial_parser_feed(&parser, data[i], now, &message))
             accept_message(&message, state);

@@ -18,6 +18,8 @@ typedef struct {
     hardware_result_t (*write_us)(void *context, unsigned channel, unsigned pulse_us);
     hardware_result_t (*shutdown)(void *context);
     void *context;
+    hardware_result_t (*poll)(void *context);
+    hardware_result_t (*write_precise_us)(void *context, unsigned channel, float pulse_us);
 } bench_servo_driver_t;
 
 typedef struct {
@@ -35,6 +37,15 @@ typedef struct {
     bench_servo_config_t config;
     bench_servo_channel_t channels[BENCH_SERVO_MAX_CHANNELS];
     unsigned used;
+    float scan_origin[BENCH_SERVO_MAX_CHANNELS]; /* pulse widths in microseconds */
+    float scan_elapsed_ms;
+    float scan_duration_ms[BENCH_SERVO_MAX_CHANNELS];
+    float scan_start_ms[BENCH_SERVO_MAX_CHANNELS];
+    float scan_ramp_ms[BENCH_SERVO_MAX_CHANNELS];
+    float scan_speed_us_per_s[BENCH_SERVO_MAX_CHANNELS];
+    bool scan_pose_active;
+    bool measure_after_pose, distance_ready, base_active;
+    unsigned scan_request_id;
     int64_t last_ms;
     bool initialized, latched, fault, shutdown_confirmed;
 } bench_servo_t;
@@ -44,7 +55,11 @@ bool bench_servo_init(bench_servo_t *servos, const bench_servo_driver_t *driver,
                       const bench_servo_config_t *config);
 /* Sets the target (0..180) of the servo on `gpio`, claiming a channel on first use.
  * The first command of a pin jumps to the target; later ones are slew limited by poll. */
-bench_servo_result_t bench_servo_set(bench_servo_t *servos, int gpio, int degrees);
+bench_servo_result_t bench_servo_set(bench_servo_t *servos, int gpio, float degrees);
+bool bench_servo_prepare_scan(bench_servo_t *servos);
+bool bench_servo_idle_pose(bench_servo_t *servos);
+int bench_servo_named_gpio(const char *name);
+bool bench_servo_named_reference(int gpio, int degrees, float *reference);
 /* Non-blocking slew; call every loop. A driver failure latches and sets the fault flag. */
 void bench_servo_poll(bench_servo_t *servos, int64_t now_ms);
 /* Latches (no further commands) and stops the PWM; repeats shutdown until the driver confirms. */

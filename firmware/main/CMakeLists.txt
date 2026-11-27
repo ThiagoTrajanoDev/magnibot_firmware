@@ -4,6 +4,7 @@ idf_component_register(
         "bench_control.c"
         "motion_model.c"
         "base_motion.c"
+        "base_scan.c"
         "sensor_data.c"
         "cycle_sequence.c"
         "robot_runtime.c"
@@ -29,6 +30,8 @@ idf_component_register(
         esp_driver_i2c
         vl53l0x
         esp_driver_ledc
+        esp_driver_mcpwm
         esp_timer
         esp_driver_usb_serial_jtag
+        esp_driver_uart
 )

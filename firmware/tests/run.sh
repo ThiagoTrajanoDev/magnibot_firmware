@@ -47,7 +47,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
 "$test_dir/test_interfaces"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g \
     -Imain tests/test_bench_servo.c main/bench_servo.c main/gpio_policy.c \
-    -o "$test_dir/test_bench_servo"
+    -lm -o "$test_dir/test_bench_servo"
 "$test_dir/test_bench_servo"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
     tests/test_base_motion.c main/base_motion.c -lm -o "$test_dir/test_base_motion"
@@ -55,3 +55,11 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
     tests/test_tof_acquisition.c main/tof_acquisition.c -o "$test_dir/test_tof"
 "$test_dir/test_tof"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
+    -DCONFIG_MAGNIBOT_SHOULDER_MIN_US=500 -DCONFIG_MAGNIBOT_SHOULDER_MAX_US=2500 \
+    tests/test_shoulder_calibration.c main/bench_servo.c main/gpio_policy.c \
+    -lm -o "$test_dir/test_shoulder_calibration"
+"$test_dir/test_shoulder_calibration"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -g -Imain \
+    tests/test_base_scan.c main/base_scan.c -o "$test_dir/test_base_scan"
+"$test_dir/test_base_scan"

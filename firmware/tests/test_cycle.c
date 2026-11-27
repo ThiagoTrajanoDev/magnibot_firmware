@@ -1,5 +1,6 @@
 #include "command_control.h"
 #include "button_control.h"
+#include "config.h"
 #ifdef NDEBUG
 #error "tests rely on assert() side effects; do not build with NDEBUG"
 #endif
@@ -47,13 +48,13 @@ static void reach(cycle_phase_t wanted) {
     assert(cycle.phase==wanted);
 }
 esp_err_t gpio_config(const gpio_config_t *config) {
-    assert(config->pin_bit_mask == (1ULL << 4));
+    assert(config->pin_bit_mask == (1ULL << BTN_START_GPIO));
     assert(config->mode == GPIO_MODE_INPUT && config->pull_up_en == GPIO_PULLUP_ENABLE);
     return ESP_OK;
 }
 
 int gpio_get_level(gpio_num_t pin) {
-    assert(pin == 4);
+    assert(pin == BTN_START_GPIO);
     return 1;
 }
 
@@ -65,7 +66,7 @@ static void test_start_button(void) {
     setup();
     button_control_t button;
     robot_event_t event;
-    assert(button_control_init(&button, 4) == ESP_OK);
+    assert(button_control_init(&button, BTN_START_GPIO) == ESP_OK);
     assert(!button_control_sample(&button, 0, 10, &event));
     assert(!button_control_sample(&button, 0, 60, &event));
     assert(!button_control_sample(&button, 1, 100, &event));

@@ -28,7 +28,7 @@ bool robot_runtime_init_with_distance(const sensor_driver_t *driver) {
     return initialized;
 }
 
-void robot_runtime_poll(robot_state_t *state, int64_t now_ms) {
+void robot_runtime_poll_with_acquisition(robot_state_t *state, int64_t now_ms, bool allow_requests) {
     if (!state) return;
     if (!initialized) { *state = ROBOT_ERROR; return; }
     if (*state == ROBOT_ERROR) {
@@ -36,7 +36,7 @@ void robot_runtime_poll(robot_state_t *state, int64_t now_ms) {
         sensor_interface_stop(&acquisition);
         cycle_abort(&cycle, CYCLE_EMERGENCY);
     }
-    sensor_interface_poll(&acquisition, now_ms);
+    sensor_interface_poll_enabled(&acquisition, now_ms, allow_requests);
     cycle_tick(&cycle, now_ms);
     /* The cycle phase owns every non-emergency state; bench_control admits only emergencies. */
     *state = cycle_robot_state(&cycle);
@@ -73,4 +73,8 @@ bool robot_runtime_distance(int64_t now_ms, float *mm) {
         return false;
     *mm = sensors.distance_mm.value;
     return true;
+}
+
+void robot_runtime_poll(robot_state_t *state, int64_t now_ms) {
+    robot_runtime_poll_with_acquisition(state, now_ms, true);
 }

@@ -1,5 +1,7 @@
 #include "serial_protocol.h"
 #include <string.h>
+#include <limits.h>
+#include "bench_servo.h"
 
 void serial_parser_init(serial_parser_t *parser) {
     if (parser) memset(parser, 0, sizeof(*parser));
@@ -29,6 +31,16 @@ static void parse_servo(char *line, protocol_message_t *message) {
 
 static void parse_line(char *line, protocol_message_t *message) {
     *message = (protocol_message_t){.error = PROTOCOL_BAD_FRAME};
+    if (strcmp(line, "IDLE") == 0) {
+        message->command = COMMAND_IDLE_POSE;
+        message->error = PROTOCOL_OK;
+        return;
+    }
+    if ((strcmp(line, "varredura") == 0 || strcmp(line, "preparar") == 0)) {
+        message->command = COMMAND_START;
+        message->error = PROTOCOL_OK;
+        return;
+    }
     if (line[0] >= '0' && line[0] <= '9') {
         parse_servo(line, message);
         return;
@@ -37,6 +49,24 @@ static void parse_line(char *line, protocol_message_t *message) {
     if (!first) return;
     *first++ = '\0';
     if (strcmp(line, "MB1") != 0) {
+        int gpio = bench_servo_named_gpio(line);
+        if (gpio >= 0) {
+            int degrees = 0;
+            const bool negative = *first == '-';
+            if (negative) ++first;
+            if (!*first) return;
+            for (; *first; ++first) {
+                if (*first < '0' || *first > '9') return;
+                if (degrees <= (INT_MAX - 9) / 10) degrees = degrees * 10 + (*first - '0');
+                else degrees = INT_MAX;
+            }
+            message->command = COMMAND_SERVO;
+            message->named_servo = true;
+            message->servo_gpio = gpio;
+            message->servo_degrees = negative ? -degrees : degrees;
+            message->error = PROTOCOL_OK;
+            return;
+        }
         message->error = PROTOCOL_BAD_VERSION;
         return;
     }

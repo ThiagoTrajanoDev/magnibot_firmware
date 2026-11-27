@@ -11,6 +11,7 @@ command_result_t command_control_execute(robot_state_t *state, serial_command_t 
             bench_control_event(state, EVENT_EMERGENCY);
             return COMMAND_ACCEPTED;
         case COMMAND_START:
+        case COMMAND_IDLE_POSE:
         case COMMAND_CONFIRM:
         case COMMAND_RESCAN:
             return *state == ROBOT_ERROR ? COMMAND_EMERGENCY_LATCHED : COMMAND_MOTION_BLOCKED;
@@ -35,9 +36,10 @@ command_result_t command_control_cycle(cycle_sequence_t *cycle, const cycle_plan
 }
 
 command_result_t command_control_servo(robot_state_t *state, bench_servo_t *servos,
-                                       int gpio, int degrees) {
+                                       int gpio, float degrees) {
     if (!state) return COMMAND_INVALID;
     if (*state == ROBOT_ERROR) return COMMAND_EMERGENCY_LATCHED;
+    if (servos && (servos->scan_pose_active || servos->base_active)) return COMMAND_MOTION_BLOCKED;
     switch (bench_servo_set(servos, gpio, degrees)) {
         case BENCH_SERVO_OK: return COMMAND_ACCEPTED;
         case BENCH_SERVO_DISABLED: return COMMAND_SERVO_DISABLED;
@@ -59,6 +61,7 @@ const char *command_control_result_name(command_result_t result) {
         case COMMAND_SERVO_ANGLE: return "angle_out_of_range";
         case COMMAND_SERVO_NO_CHANNEL: return "no_free_channel";
         case COMMAND_SERVO_FAULT: return "servo_fault";
+        case COMMAND_POSE_NOT_READY: return "pose_not_ready";
         default: return "invalid_command";
     }
 }

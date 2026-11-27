@@ -47,7 +47,7 @@ int main(void) {
     assert(robot_runtime_init());
     serial_control_poll(NULL);
     bench_servo_config_t servo_config = {.max_dps = 90,
-        .start_pin = 4, .led_pin = 48, .estop_pin = 6, .base_pin = 15};
+        .start_pin = 7, .led_pin = 48, .estop_pin = 6, .base_pin = 15};
     bench_servo_driver_t servo_driver = {.attach = servo_attach, .write_us = servo_write, .shutdown = servo_shutdown};
     assert(bench_servo_init(&servos, &servo_driver, &servo_config));
     assert(serial_control_init(&servos) == ESP_ERR_INVALID_ARG);
@@ -60,10 +60,19 @@ int main(void) {
     assert(original_stdout >= 0 && dup2(fileno(capture), STDOUT_FILENO) >= 0);
     feed("MB1 1 sta");
     feed("tus\n");
-    feed("MB1 2 start\n");
+    feed("MB1 2 confirm\n");
     assert(state == ROBOT_IDLE);
+    fflush(stdout);
+    const long before = ftell(capture);
+    feed("ombro 181\nombro -1\nombro 999999999999999\n");
+    fflush(stdout);
+    assert(ftell(capture) == before && servo_attaches == 0);
+    feed("ombro 105\n");
+    assert(servo_attaches == 1 && servo_pulse == 1667);
     feed("16 90\n");
-    assert(servo_attaches == 1 && servo_pulse == 1916);
+    assert(servo_attaches == 1 && servo_pulse == 1667);
+    feed("varredura\n");
+    assert(!servos.scan_pose_active && servo_attaches == 1);
     feed("99 10\n16 181\n");
     feed("MB1 3 incomplete");
     now += SERIAL_FRAME_TIMEOUT_MS;
@@ -87,6 +96,7 @@ int main(void) {
     output[n] = '\0'; fclose(capture);
     assert(strstr(output, "\"id\":1,\"ok\":true"));
     assert(strstr(output, "\"code\":\"motion_blocked\""));
+    assert(strstr(output, "\"code\":\"pose_not_ready\""));
     assert(strstr(output, "\"code\":\"timeout\""));
     assert(strstr(output, "\"diagnostic\":{"));
     assert(strstr(output, "\"backend\":\"disabled\",\"actuator_shutdown_confirmed\":false"));
@@ -99,5 +109,24 @@ int main(void) {
     assert(strstr(output, "\"bench_servo\":{\"enabled\":true,\"channels\":1}"));
     assert(!strstr(output, "\"target_deg\":45"));
     assert(strstr(output, "\"id\":8,\"ok\":false,\"code\":\"emergency_latched\""));
+    /* Fresh fixture: the serial shortcut starts the synchronized ramp only when ready. */
+    state = ROBOT_IDLE;
+    servos = (bench_servo_t){0};
+    assert(bench_servo_init(&servos, &servo_driver, &servo_config));
+    feed("preparar\n");
+    assert(servos.used == 4 && servos.scan_pose_active && state == ROBOT_IDLE);
+    feed("MB1 9 estop\npreparar\n");
+    assert(state == ROBOT_ERROR);
+    bench_servo_stop(&servos);
+    assert(!servos.scan_pose_active && servos.latched);
+    state = ROBOT_IDLE;
+    servos = (bench_servo_t){0};
+    assert(bench_servo_init(&servos, &servo_driver, &servo_config));
+    feed("IDLE\n");
+    assert(servos.used == 5 && servos.scan_pose_active && state == ROBOT_IDLE);
+    feed("MB1 10 estop\nIDLE\n");
+    assert(state == ROBOT_ERROR);
+    bench_servo_stop(&servos);
+    assert(!servos.scan_pose_active && servos.latched);
     puts("PASS: serial integration, init failure, fragmented RX, timeout, saturated queue emergency, diagnostics");
 }

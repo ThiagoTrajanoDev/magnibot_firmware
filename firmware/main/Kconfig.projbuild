@@ -28,9 +28,36 @@ config MAGNIBOT_SERVO_MAX_DPS
     help
         Limita a rampa entre comandos consecutivos no mesmo GPIO. O primeiro
         comando de cada GPIO vai direto ao alvo, na velocidade do proprio servo.
+config MAGNIBOT_BASE_SCAN
+    bool "Habilitar varredura temporizada da base no GPIO 15"
+    depends on MAGNIBOT_BENCH_SERVO
+    default n
 config MAGNIBOT_TOF
     bool "Habilitar leitura VL53L0X nos GPIOs 11 e 12"
     default n
     help
         Habilita apenas aquisicao de distancia. Nao autoriza atuadores.
+config MAGNIBOT_TOF_DIAGNOSTIC
+    bool "Repetir diagnostico VL53L0X sem PWM"
+    depends on MAGNIBOT_TOF && !MAGNIBOT_BENCH_SERVO
+    default n
+config MAGNIBOT_UART_COMMANDS
+    bool "Receber comandos pela UART do console"
+    depends on ESP_CONSOLE_UART
+    default n
+config MAGNIBOT_SHOULDER_MIN_US
+    int "Ombro: menor pulso permitido na bancada (us)"
+    depends on MAGNIBOT_BENCH_SERVO
+    range 500 1915
+    default 500
+    help
+        Limite inferior de calibracao. Use o valor conferido na montagem atual.
+
+config MAGNIBOT_SHOULDER_MAX_US
+    int "Ombro: maior pulso permitido na bancada (us)"
+    depends on MAGNIBOT_BENCH_SERVO
+    range 1917 2500
+    default 2500
+    help
+        Limite superior de calibracao. Use o valor conferido na montagem atual.
 endmenu
