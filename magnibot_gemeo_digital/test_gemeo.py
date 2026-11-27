@@ -21,7 +21,8 @@ LINHA_SEM_ANGULOS = '{"type":"telemetry","version":1,"state":"IDLE","state_code"
 
 
 def test_interpretar_linha():
-    assert interpretar_linha(LINHA_REAL)["state"] == "IDLE"
+    tel = interpretar_linha(LINHA_REAL)
+    assert tel is not None and tel["state"] == "IDLE"
     assert interpretar_linha("I (320) cpu_start: Starting scheduler") is None   # log comum
     assert interpretar_linha('{"type":"response","version":1}') is None         # não é telemetria
     assert interpretar_linha('{"type":"telemetry","version":2}') is None        # versão errada
@@ -30,15 +31,18 @@ def test_interpretar_linha():
 
 def test_extrair_angulos():
     tel = interpretar_linha(LINHA_REAL)
+    assert tel is not None
     assert extrair_angulos(tel) == POSE_IDLE_SERVO                              # base sem calibração fica em 0
     assert base_sem_calibracao(tel)
-    assert extrair_angulos(interpretar_linha(LINHA_SEM_ANGULOS)) is None
+    sem_angulos = interpretar_linha(LINHA_SEM_ANGULOS)
+    assert sem_angulos is not None and extrair_angulos(sem_angulos) is None
     assert extrair_angulos({"angles_deg": [1, 2, 3, 4, 5, 6]}) == [1, 2, 3, 4, 5, 6]
     nomes = dict(base=1, ombro=2, cotovelo=3, punho_rot=4, punho_flex=5, garra=6)
     assert extrair_angulos({"angles_deg": nomes}) == [1, 2, 3, 4, 5, 6]
     assert extrair_angulos({"angles_deg": [1, None, 3, 4, 5, 6]}) is None
     assert extrair_angulos({"angles_deg": {"ombro": None, "garra": True}}) is None
     parcial = extrair_angulos({"angles_deg": {"ombro": 100.0, "garra": None}})  # servo ainda não ligado
+    assert parcial is not None
     assert parcial[1] == 100 and parcial[5] == POSE_NEUTRA_SERVO[5]
 
 
@@ -56,6 +60,11 @@ class PortaFalsa:
     def __init__(self, pedacos):
         self.pedacos = list(pedacos)
         self.in_waiting = 0
+        self.enviados = []
+
+    def write(self, quadro):
+        self.enviados.append(quadro)
+        return len(quadro)
 
     def read(self, _n):
         if not self.pedacos:
@@ -98,8 +107,11 @@ def test_garra_abre_e_fecha():
 def test_simulador():
     for t in range(0, 40):
         tel = telemetria_em(t)
-        assert tel["type"] == "telemetry" and len(extrair_angulos(tel)) == 6
-    assert np.allclose(servo_para_modelo(extrair_angulos(telemetria_em(0))), POSE_NEUTRA, atol=0.1)  # 1 casa decimal
+        angulos = extrair_angulos(tel)
+        assert tel["type"] == "telemetry" and angulos is not None and len(angulos) == 6
+    iniciais = extrair_angulos(telemetria_em(0))
+    assert iniciais is not None
+    assert np.allclose(servo_para_modelo(iniciais), POSE_NEUTRA, atol=0.1)  # 1 casa decimal
 
 
 def test_quadros_batem_com_os_palitos():
@@ -146,6 +158,42 @@ def test_executar_no_gemeo():
     assert g.angulos_alvo == POSE_IDLE_SERVO
     g.executar("auto")
     assert not g.manual
+
+
+def test_botoes_com_resposta_serial():
+    from matplotlib.backend_bases import MouseButton, MouseEvent
+    from matplotlib import pyplot as plt
+    from gemeo import Gemeo
+
+    porta = PortaFalsa([])
+    g = Gemeo(LeitorSerial(porta))
+    try:
+        retorno = g.txt_controle
+        assert retorno is not None
+        canvas = g.fig.canvas
+        for comando in ("start", "estop"):
+            x, y = g.botoes[comando].ax.transAxes.transform((0.5, 0.5))
+            for evento in ("button_press_event", "button_release_event"):
+                canvas.callbacks.process(evento, MouseEvent(evento, canvas, x, y, button=MouseButton.LEFT))
+        assert porta.enviados == [b"\nMB1 1 start\n", b"MB1 2 estop\n"]
+
+        porta.pedacos.append(
+            b'{"type":"response","version":1,"id":2,"ok":true,"code":"ok"}\n'
+            b'{"type":"response","version":1,"id":1,"ok":false,"code":"motion_blocked"}\n'
+            b'{"type":"telemetry","version":1,"state_code":4,"search_status":"no_object"}\n'
+        )
+        g.quadro(0)
+        assert "Start: recusado (motion_blocked)" in retorno.get_text()
+        assert "Emergência: aceito pelo ESP32" in retorno.get_text()
+        assert g.txt_estado.get_text() == "ERRO"
+        assert "no_object" in g.txt_aviso.get_text()
+
+        g.enviar_controle("start")
+        g.pendentes["start"] = (3, 0)
+        g.quadro(1)
+        assert "Start: sem confirmação do ESP32" in retorno.get_text()
+    finally:
+        plt.close(g.fig)
 
 
 if __name__ == "__main__":
